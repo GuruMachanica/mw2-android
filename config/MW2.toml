@@ -1,0 +1,47 @@
+[main]
+file_path = "../mw2/default.xex"
+out_directory_path = "../ppc"
+switch_table_file_path = "mw2_switch_tables.toml"
+
+skip_lr = false
+skip_msr = false
+ctr_as_local = false
+xer_as_local = false
+reserved_as_local = false
+cr_as_local = false
+non_argument_as_local = false
+non_volatile_as_local = false
+
+restgprlr_14_address = 0x823DDF90
+savegprlr_14_address = 0x823DDF40
+restfpr_14_address   = 0x823DE03C
+savefpr_14_address   = 0x823DDFF0
+restvmx_14_address   = 0x823DF638
+savevmx_14_address   = 0x823DF3A0
+restvmx_64_address   = 0x823DF6CC
+savevmx_64_address   = 0x823DF434
+
+# Compact "bdzf ladder" dispatch that XenonAnalyse splits into 5 separate
+# functions; the fallthrough targets 0x8232D874/890/8AC are internal labels,
+# not entry points. Real extent: 0x8232D830 .. 0x8232D8C8 (blr) = 0x9C bytes.
+functions = [
+    # Compact "bdzf ladder" dispatch that XenonAnalyse splits into 5 functions;
+    # 0x8232D874/890/8AC are internal fallthrough labels, not entry points.
+    { address = 0x8232D830, size = 0x9C },
+
+    # Leaf functions (no stack frame, hence absent from .pdata) that contain
+    # jump tables. The analyzer ends them early because a table dispatch looks
+    # like a tail call. Extents derived by tools/fixbounds.py from bl targets,
+    # padding runs and the tables' own case labels.
+    { address = 0x820ED8D0, size = 0x98 },
+    { address = 0x82140530, size = 0x118 },
+    { address = 0x82140670, size = 0x114 },
+    { address = 0x82140810, size = 0x3B8 },
+    { address = 0x822C8A28, size = 0x88 },
+    { address = 0x822D0BE8, size = 0xE0 },
+    { address = 0x822D2218, size = 0x94 },
+    { address = 0x822DF140, size = 0x20C },
+    { address = 0x822DF350, size = 0x1E0 },
+    { address = 0x822E2770, size = 0x1B0 },
+    { address = 0x823C82B0, size = 0x14C },
+]

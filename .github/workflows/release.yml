@@ -1,0 +1,197 @@
+# Builds the player's release and drafts a GitHub Release with it. Run by hand
+# from the Actions tab.
+#
+# The recompiled code is made from the disc's two executables, which are not in
+# this repository. They come from a private one, as Unleashed Recompiled does
+# it: the secret ASSET_REPO names it (owner/name), ASSET_REPO_TOKEN is a token
+# that can read it, and it holds default.xex and default_mp.xex at its root.
+name: release
+
+on:
+  workflow_dispatch:
+    inputs:
+      version:
+        description: "Release tag, e.g. v0.1.0"
+        required: true
+
+permissions:
+  contents: write
+
+jobs:
+  linux:
+    # The oldest supported runner, so the binaries ask for glibc 2.35 at most.
+    runs-on: ubuntu-22.04
+    timeout-minutes: 330
+    env:
+      CCACHE_DIR: ${{ github.workspace }}/.ccache
+      CCACHE_BASEDIR: ${{ github.workspace }}
+      CCACHE_MAXSIZE: 6G
+      CCACHE_COMPILERCHECK: content
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Check out the game's executables
+        uses: actions/checkout@v4
+        with:
+          repository: ${{ secrets.ASSET_REPO }}
+          token: ${{ secrets.ASSET_REPO_TOKEN }}
+          path: private
+
+      - name: Place them
+        run: |
+          mkdir -p mw2
+          cp private/default.xex private/default_mp.xex mw2/
+          rm -rf private
+
+      - name: Install the toolchain and libraries
+        run: |
+          wget -qO llvm.sh https://apt.llvm.org/llvm.sh
+          sudo bash llvm.sh 18
+          # SDL3's video, audio, input and dialog backends, and the Vulkan loader.
+          sudo apt-get update
+          sudo apt-get install -y ninja-build ccache pkg-config \
+            libx11-dev libxext-dev libxrandr-dev libxcursor-dev libxfixes-dev libxi-dev \
+            libxss-dev libxtst-dev libxkbcommon-dev libwayland-dev libdecor-0-dev \
+            libegl1-mesa-dev libgl1-mesa-dev libgles2-mesa-dev libdrm-dev libgbm-dev \
+            libasound2-dev libpulse-dev libpipewire-0.3-dev \
+            libdbus-1-dev libibus-1.0-dev libudev-dev libvulkan-dev
+          # Ubuntu 22.04's Vulkan headers predate extensions the renderer asks for.
+          git clone -q --depth 1 --branch v1.3.275 https://github.com/KhronosGroup/Vulkan-Headers.git
+          cmake -S Vulkan-Headers -B Vulkan-Headers/build -G Ninja
+          sudo cmake --install Vulkan-Headers/build
+          rm -rf Vulkan-Headers llvm.sh
+
+      - name: Restore the compiler cache
+        uses: actions/cache@v4
+        with:
+          path: .ccache
+          key: ccache-linux-${{ github.sha }}
+          restore-keys: ccache-linux-
+
+      - name: Build
+        run: |
+          export CMAKE_EXTRA="-DCMAKE_C_COMPILER_LAUNCHER=ccache -DCMAKE_CXX_COMPILER_LAUNCHER=ccache -DFETCHCONTENT_BASE_DIR=$PWD/out/_deps"
+          for title in sp mp; do
+            regenerate=1
+            for online in steam lan; do
+              TITLE=$title RELEASE=1 ONLINE=$online BUILD_DIR=out/$title-$online REGENERATE=$regenerate ./build.sh
+              regenerate=0
+            done
+          done
+          ccache --show-stats
+
+      - name: Package
+        run: |
+          mkdir -p dist
+          for online in steam lan; do
+            name=mw2-${{ inputs.version }}-linux-$online
+            mkdir -p $name
+            cp out/sp-$online/mw2 $name/mw2-sp
+            cp out/mp-$online/mw2 $name/mw2-mp
+            strip $name/mw2-sp $name/mw2-mp
+            cp README.md LICENSE $name/
+            tar czf dist/$name.tar.gz $name
+          done
+          echo "glibc needed: $(objdump -T out/mp-steam/mw2 | grep -oE 'GLIBC_[0-9.]+' | sort -Vu | tail -1)"
+          ls -la dist
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: linux
+          path: dist/*
+
+  windows:
+    # Cross-compiled on Linux with llvm-mingw: the same compiler family and the
+    # same build as Linux, and the compiler cache of a Linux runner.
+    runs-on: ubuntu-24.04
+    timeout-minutes: 330
+    env:
+      CCACHE_DIR: ${{ github.workspace }}/.ccache
+      CCACHE_BASEDIR: ${{ github.workspace }}
+      CCACHE_MAXSIZE: 6G
+      CCACHE_COMPILERCHECK: content
+      LLVM_MINGW_RELEASE: "20260922"
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Check out the game's executables
+        uses: actions/checkout@v4
+        with:
+          repository: ${{ secrets.ASSET_REPO }}
+          token: ${{ secrets.ASSET_REPO_TOKEN }}
+          path: private
+
+      - name: Place them
+        run: |
+          mkdir -p mw2
+          cp private/default.xex private/default_mp.xex mw2/
+          rm -rf private
+
+      - name: Install the toolchains
+        run: |
+          sudo apt-get update
+          # clang-18 builds XenonRecomp, which runs here; llvm-mingw builds the game.
+          sudo apt-get install -y clang-18 lld-18 ninja-build ccache zip
+          name=llvm-mingw-$LLVM_MINGW_RELEASE-ucrt-ubuntu-22.04-x86_64
+          wget -q https://github.com/mstorsjo/llvm-mingw/releases/download/$LLVM_MINGW_RELEASE/$name.tar.xz
+          tar xf $name.tar.xz -C $HOME && rm $name.tar.xz
+          echo "LLVM_MINGW=$HOME/$name" >> "$GITHUB_ENV"
+
+      - name: Restore the compiler cache
+        uses: actions/cache@v4
+        with:
+          path: .ccache
+          key: ccache-windows-${{ github.sha }}
+          restore-keys: ccache-windows-
+
+      - name: Build
+        run: |
+          export CMAKE_EXTRA="-DCMAKE_C_COMPILER_LAUNCHER=ccache -DCMAKE_CXX_COMPILER_LAUNCHER=ccache -DFETCHCONTENT_BASE_DIR=$PWD/out/_deps"
+          for title in sp mp; do
+            regenerate=1
+            for online in steam lan; do
+              WINDOWS=1 TITLE=$title RELEASE=1 ONLINE=$online BUILD_DIR=out/$title-$online REGENERATE=$regenerate ./build.sh
+              regenerate=0
+            done
+          done
+          ccache --show-stats
+
+      - name: Package
+        run: |
+          mkdir -p dist
+          for online in steam lan; do
+            name=mw2-${{ inputs.version }}-windows-$online
+            mkdir -p $name
+            cp out/sp-$online/mw2.exe $name/mw2-sp.exe
+            cp out/mp-$online/mw2.exe $name/mw2-mp.exe
+            $LLVM_MINGW/bin/llvm-strip $name/mw2-sp.exe $name/mw2-mp.exe
+            cp README.md LICENSE $name/
+            zip -qr dist/$name.zip $name
+          done
+          ls -la dist
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: windows
+          path: dist/*
+
+  release:
+    needs: [linux, windows]
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          path: dist
+          merge-multiple: true
+
+      - name: Draft the release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          cat > notes.md <<'EOF'
+          Needs your own copy of the game: an ISO of the Xbox 360 disc, version 1.0.557.
+          Take `steam` to play online through Steam, `lan` to play on a local network.
+          Extract it anywhere and start `mw2-sp` or `mw2-mp`; the first start installs the game from your ISO.
+          EOF
+          gh release create "${{ inputs.version }}" dist/* --repo "${{ github.repository }}" \
+            --draft --title "${{ inputs.version }}" --notes-file notes.md --target "${{ github.sha }}"
