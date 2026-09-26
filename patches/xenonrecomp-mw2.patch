@@ -1,0 +1,683 @@
+diff --git a/XenonAnalyse/function.cpp b/XenonAnalyse/function.cpp
+index 34add40..2619648 100644
+--- a/XenonAnalyse/function.cpp
++++ b/XenonAnalyse/function.cpp
+@@ -180,8 +180,11 @@ Function Function::Analyze(const void* code, size_t size, size_t base)
+                 }
+                 else if (op == PPC_OP_CTR)
+                 {
+-                    // 5th bit of BO tells cpu to ignore the counter, which is a blr/bctr otherwise it's conditional
+-                    const bool conditional = !(PPC_BO(instruction) & 0x10);
++                    // A return is unconditional only when BO ignores both the condition (0x10)
++                    // and the counter (0x04): blr is BO 20. bdzlr (BO 18) ignores the
++                    // condition but still tests the counter, and taking it for a return
++                    // ended memset at its first bdzlr and dropped the tail bytes' stores.
++                    const bool conditional = (PPC_BO(instruction) & 0x14) != 0x14;
+                     if (conditional)
+                     {
+                         // right block's just going to return
+diff --git a/XenonAnalyse/main.cpp b/XenonAnalyse/main.cpp
+index d08371e..7790ebb 100644
+--- a/XenonAnalyse/main.cpp
++++ b/XenonAnalyse/main.cpp
+@@ -23,77 +23,118 @@ struct SwitchTable
+ 
+ void ReadTable(Image& image, SwitchTable& table)
+ {
+-    uint32_t pOffset;
+     ppc_insn insn;
+     auto* code = (uint32_t*)image.Find(table.base);
+-    ppc::Disassemble(code, table.base, insn);
+-    pOffset = insn.operands[1] << 16;
+ 
+-    ppc::Disassemble(code + 1, table.base + 4, insn);
+-    pOffset += insn.operands[2];
++    // A jump-table dispatch builds its addresses with "lis rX, hi" / "addi rX,
++    // rX, lo" pairs, but the compiler schedules other instructions between the
++    // two halves and pads the sequence with nops, so the pieces are not at
++    // fixed offsets. Locate them by opcode instead:
++    //
++    //   - the pair before the table load gives the table's address
++    //   - the pair after it gives the base that the offsets are relative to
++    //   - for a computed table, the shift is the rlwinm following the load
++    constexpr int kWindow = 14;
++
++    auto opcodeAt = [&](int i) -> const powerpc_opcode*
++        {
++            ppc::Disassemble(code + i, table.base + i * 4, insn);
++            return insn.opcode;
++        };
+ 
+-    if (table.type == SWITCH_ABSOLUTE)
++    // Complete the lis/addi pair whose lis sits at index i.
++    auto resolvePair = [&](int i) -> uint32_t
++        {
++            ppc::Disassemble(code + i, table.base + i * 4, insn);
++            uint32_t reg = insn.operands[0];
++            uint32_t value = insn.operands[1] << 16;
++
++            for (int j = i + 1; j < kWindow; j++)
++            {
++                ppc::Disassemble(code + j, table.base + j * 4, insn);
++                if (insn.opcode == nullptr)
++                    continue;
++                if (insn.opcode->id == PPC_INST_LIS && insn.operands[0] == reg)
++                    break;  // reloaded before this one was completed
++                if (insn.opcode->id == PPC_INST_ADDI && insn.operands[0] == reg && insn.operands[1] == reg)
++                {
++                    value += insn.operands[2];
++                    break;
++                }
++            }
++            return value;
++        };
++
++    int loadIndex = -1;
++    for (int i = 0; i < kWindow; i++)
+     {
+-        const auto* offsets = (be<uint32_t>*)image.Find(pOffset);
+-        for (size_t i = 0; i < table.labels.size(); i++)
++        const powerpc_opcode* op = opcodeAt(i);
++        if (op != nullptr && (op->id == PPC_INST_LWZX || op->id == PPC_INST_LHZX || op->id == PPC_INST_LBZX))
+         {
+-            table.labels[i] = offsets[i];
++            loadIndex = i;
++            break;
+         }
+     }
+-    else if (table.type == SWITCH_COMPUTED)
+-    {
+-        uint32_t base;
+-        uint32_t shift;
+-        const auto* offsets = (uint8_t*)image.Find(pOffset);
+ 
+-        ppc::Disassemble(code + 4, table.base + 0x10, insn);
+-        base = insn.operands[1] << 16;
++    uint32_t pOffset = 0;
++    uint32_t base = 0;
++    uint32_t shift = 0;
++    bool haveOffset = false;
++    bool haveBase = false;
+ 
+-        ppc::Disassemble(code + 5, table.base + 0x14, insn);
+-        base += insn.operands[2];
+-
+-        ppc::Disassemble(code + 3, table.base + 0x0C, insn);
+-        shift = insn.operands[2];
++    for (int i = 0; i < kWindow; i++)
++    {
++        const powerpc_opcode* op = opcodeAt(i);
++        if (op == nullptr || op->id != PPC_INST_LIS)
++            continue;
+ 
+-        for (size_t i = 0; i < table.labels.size(); i++)
++        if (loadIndex < 0 || i < loadIndex)
+         {
+-            table.labels[i] = base + (offsets[i] << shift);
++            if (!haveOffset) { pOffset = resolvePair(i); haveOffset = true; }
++        }
++        else if (!haveBase)
++        {
++            base = resolvePair(i);
++            haveBase = true;
+         }
+     }
+-    else if (table.type == SWITCH_BYTEOFFSET || table.type == SWITCH_SHORTOFFSET)
++
++    if (loadIndex >= 0)
+     {
+-        if (table.type == SWITCH_BYTEOFFSET)
++        for (int i = loadIndex + 1; i < kWindow; i++)
+         {
+-            const auto* offsets = (uint8_t*)image.Find(pOffset);
+-            uint32_t base;
+-
+-            ppc::Disassemble(code + 3, table.base + 0x0C, insn);
+-            base = insn.operands[1] << 16;
+-
+-            ppc::Disassemble(code + 4, table.base + 0x10, insn);
+-            base += insn.operands[2];
+-
+-            for (size_t i = 0; i < table.labels.size(); i++)
++            const powerpc_opcode* op = opcodeAt(i);
++            if (op != nullptr && op->id == PPC_INST_RLWINM)
+             {
+-                table.labels[i] = base + offsets[i];
++                shift = insn.operands[2];
++                break;
+             }
+         }
+-        else if (table.type == SWITCH_SHORTOFFSET)
+-        {
+-            const auto* offsets = (be<uint16_t>*)image.Find(pOffset);
+-            uint32_t base;
+-
+-            ppc::Disassemble(code + 4, table.base + 0x10, insn);
+-            base = insn.operands[1] << 16;
+-
+-            ppc::Disassemble(code + 5, table.base + 0x14, insn);
+-            base += insn.operands[2];
++    }
+ 
+-            for (size_t i = 0; i < table.labels.size(); i++)
+-            {
+-                table.labels[i] = base + offsets[i];
+-            }
+-        }
++    if (table.type == SWITCH_ABSOLUTE)
++    {
++        const auto* offsets = (be<uint32_t>*)image.Find(pOffset);
++        for (size_t i = 0; i < table.labels.size(); i++)
++            table.labels[i] = offsets[i];
++    }
++    else if (table.type == SWITCH_COMPUTED)
++    {
++        const auto* offsets = (uint8_t*)image.Find(pOffset);
++        for (size_t i = 0; i < table.labels.size(); i++)
++            table.labels[i] = base + (offsets[i] << shift);
++    }
++    else if (table.type == SWITCH_BYTEOFFSET)
++    {
++        const auto* offsets = (uint8_t*)image.Find(pOffset);
++        for (size_t i = 0; i < table.labels.size(); i++)
++            table.labels[i] = base + offsets[i];
++    }
++    else if (table.type == SWITCH_SHORTOFFSET)
++    {
++        const auto* offsets = (be<uint16_t>*)image.Find(pOffset);
++        for (size_t i = 0; i < table.labels.size(); i++)
++            table.labels[i] = base + offsets[i];
+     }
+     else
+     {
+@@ -154,10 +195,23 @@ void* SearchMask(const void* source, const uint32_t* compare, size_t compareCoun
+     for (size_t i = 0; i < count; i++)
+     {
+         size_t c = 0;
+-        for (c = 0; c < compareCount; c++)
++        size_t k = 0;
++        for (c = 0; c < compareCount; c++, k++)
+         {
+-            ppc::Disassemble(&src[i + c], 0, insn);
+-            if (insn.opcode == nullptr || insn.opcode->id != compare[c])
++            // These sequences get padded with nops; skip them so a scheduling
++            // artefact does not hide an otherwise matching pattern.
++            while (i + k < count)
++            {
++                ppc::Disassemble(&src[i + k], 0, insn);
++                if (c > 0 && insn.opcode != nullptr && insn.opcode->id == PPC_INST_NOP)
++                {
++                    k++;
++                    continue;
++                }
++                break;
++            }
++
++            if (i + k >= count || insn.opcode == nullptr || insn.opcode->id != compare[c])
+             {
+                 break;
+             }
+@@ -295,15 +349,38 @@ int main(int argc, char** argv)
+         PPC_INST_MTCTR,
+     };
+ 
++    // XDK 8276 schedules the index shift between the lis and the addi. Same
++    // tables, different instruction order.
++    uint32_t absoluteSwitchShiftFirst[] =
++    {
++        PPC_INST_LIS, PPC_INST_RLWINM, PPC_INST_ADDI,
++        PPC_INST_LWZX, PPC_INST_MTCTR, PPC_INST_BCTR,
++    };
++
++    uint32_t computedSwitchShiftFirst[] =
++    {
++        PPC_INST_LIS, PPC_INST_RLWINM, PPC_INST_ADDI, PPC_INST_LBZX,
++        PPC_INST_LIS, PPC_INST_ADDI, PPC_INST_ADD, PPC_INST_MTCTR,
++    };
++
++    uint32_t wordOffsetSwitchShiftFirst[] =
++    {
++        PPC_INST_LIS, PPC_INST_RLWINM, PPC_INST_ADDI, PPC_INST_LHZX,
++        PPC_INST_LIS, PPC_INST_ADDI, PPC_INST_ADD, PPC_INST_MTCTR,
++    };
++
+     println("# ---- ABSOLUTE JUMPTABLE ----");
+     scanPattern(absoluteSwitch, std::size(absoluteSwitch), SWITCH_ABSOLUTE);
++    scanPattern(absoluteSwitchShiftFirst, std::size(absoluteSwitchShiftFirst), SWITCH_ABSOLUTE);
+ 
+     println("# ---- COMPUTED JUMPTABLE ----");
+     scanPattern(computedSwitch, std::size(computedSwitch), SWITCH_COMPUTED);
++    scanPattern(computedSwitchShiftFirst, std::size(computedSwitchShiftFirst), SWITCH_COMPUTED);
+ 
+     println("# ---- OFFSETED JUMPTABLE ----");
+     scanPattern(offsetSwitch, std::size(offsetSwitch), SWITCH_BYTEOFFSET);
+     scanPattern(wordOffsetSwitch, std::size(wordOffsetSwitch), SWITCH_SHORTOFFSET);
++    scanPattern(wordOffsetSwitchShiftFirst, std::size(wordOffsetSwitchShiftFirst), SWITCH_SHORTOFFSET);
+ 
+     std::ofstream f(argv[2]);
+     f.write(out.data(), out.size());
+diff --git a/XenonRecomp/recompiler.cpp b/XenonRecomp/recompiler.cpp
+index fa91527..5bb8024 100644
+--- a/XenonRecomp/recompiler.cpp
++++ b/XenonRecomp/recompiler.cpp
+@@ -609,7 +609,10 @@ bool Recompiler::Recompile(
+     case PPC_INST_BCTR:
+         if (switchTable != config.switchTables.end())
+         {
+-            println("\tswitch ({}.u64) {{", r(switchTable->second.r));
++            // The index is 32 bits: the guard ahead of a jump table is cmplwi, and
++            // a rlwinm feeding it leaves the value duplicated into the high half,
++            // so switching on the whole register misses every case but zero.
++            println("\tswitch ({}.u32) {{", r(switchTable->second.r));
+ 
+             for (size_t i = 0; i < switchTable->second.labels.size(); i++)
+             {
+@@ -627,8 +630,11 @@ bool Recompiler::Recompile(
+                 }
+             }
+ 
++            // Not unreachable: saying so lets the compiler drop the bounds check,
++            // and an index the guard let through then jumps to a host address
++            // read from past the end of the table.
+             println("\tdefault:");
+-            println("\t\t__builtin_unreachable();");
++            println("\t\treturn;");
+             println("\t}}");
+ 
+             switchTable = config.switchTables.end();
+@@ -1260,7 +1266,7 @@ bool Recompiler::Recompile(
+         break;
+ 
+     case PPC_INST_MFTB:
+-        println("\t{}.u64 = __rdtsc();", r(insn.operands[0]));
++        println("\t{}.u64 = PPC_QUERY_TIMEBASE();", r(insn.operands[0]));
+         break;
+ 
+     case PPC_INST_MR:
+@@ -1486,6 +1492,12 @@ bool Recompiler::Recompile(
+         println("\t{}.u32 = {};", r(insn.operands[2]), ea());
+         break;
+ 
++    case PPC_INST_STBUX:
++        println("\t{} = {}.u32 + {}.u32;", ea(), r(insn.operands[1]), r(insn.operands[2]));
++        println("\tPPC_STORE_U8({}, {}.u8);", ea(), r(insn.operands[0]));
++        println("\t{}.u32 = {};", r(insn.operands[1]), ea());
++        break;
++
+     case PPC_INST_STBX:
+         print("{}", mmioStore() ? "\tPPC_MM_STORE_U8(" : "\tPPC_STORE_U8(");
+         if (insn.operands[1] != 0)
+@@ -1995,9 +2007,30 @@ bool Recompiler::Recompile(
+     }
+ 
+     case PPC_INST_VPKD3D128:
++    {
+         // TODO: vectorize somehow?
+         // NOTE: handling vector reversal here too
+         printSetFlushMode(true);
++
++        // float16_2 and float16_4 differ only in how many components they take
++        // and where those land, so the conversion itself lives in one place.
++        auto packHalf = [&](size_t dest, size_t source)
++        {
++            // Strip sign from source
++            println("\t{}.u32 = ({}.u32[{}]&0x7FFFFFFF);", temp(), v(insn.operands[1]), source);
++            // If |source| is > 65504, clamp output to 0x7FFF, else save 8 exponent bits
++            println("\t{0}.u8[0] = ({1}.f32 != {1}.f32) || ({1}.f32 > 65504.0f) ? 0xFF : (({2}.u32[{3}]&0x7f800000)>>23);", vTemp(), temp(), v(insn.operands[1]), source);
++            // If 8 exponent bits were saved, it can only be 0x8E at most
++            // If saved, save first 10 bits of mantissa
++            println("\t{}.u16 = {}.u8[0] != 0xFF ? (({}.u32[{}]&0x7FE000)>>13) : 0x0;", temp(), vTemp(), v(insn.operands[1]), source);
++            // If saved and > 127-15, exponent is converted from 8 to 5-bit by subtracting 0x70
++            // If saved but not > 127-15, clamp exponent at 0, add 0x400 to mantissa and shift right by (0x71-exponent)
++            // If right shift is greater than 31 bits, manually clamp mantissa to 0 or else the output of the shift will be wrong
++            println("\t{0}.u16[{1}] = {2}.u8[0] != 0xFF ? ({2}.u8[0] > 0x70 ? ((({2}.u8[0]-0x70)<<10)+{3}.u16) : (0x71-{2}.u8[0] > 31 ? 0x0 : ((0x400+{3}.u16)>>(0x71-{2}.u8[0])))) : 0x7FFF;", v(insn.operands[0]), dest, vTemp(), temp());
++            // Add back original sign
++            println("\t{}.u16[{}] |= (({}.u32[{}]&0x80000000)>>16);", v(insn.operands[0]), dest, v(insn.operands[1]), source);
++        };
++
+         switch (insn.operands[2])
+         {
+         case 0: // D3D color
+@@ -2014,26 +2047,40 @@ bool Recompiler::Recompile(
+             println("\t{}.u32[{}] = {}.u32;", v(insn.operands[0]), insn.operands[4], temp());
+             break;
+ 
++        case 2: // three 10-bit signed normalised components, w in the top two bits
++            // The inverse of the unpack below: the caller has already put each
++            // component back in the mantissa of 3.0f, so the field is just the
++            // low bits of the float. Clamped because one component overflowing
++            // its field would corrupt the next one.
++            {
++                constexpr size_t lanes[]  = { 3, 2, 1, 0 };     // x, y, z, w
++                constexpr size_t shifts[] = { 20, 10, 0, 30 };
++                constexpr int    limits[] = { 511, 511, 511, 1 };
++                constexpr uint32_t masks[]= { 0x3FF, 0x3FF, 0x3FF, 0x3 };
++                for (size_t i = 0; i < 4; i++)
++                {
++                    println("\t{}.s32[{}] = int32_t({}.u32[{}]) - 0x40400000;", vTemp(), i, v(insn.operands[1]), lanes[i]);
++                    println("\t{0}.s32[{1}] = {0}.s32[{1}] < {2} ? {2} : ({0}.s32[{1}] > {3} ? {3} : {0}.s32[{1}]);", vTemp(), i, -limits[i] - 1, limits[i]);
++                    println("\t{}.u32 {}= (uint32_t({}.s32[{}]) & 0x{:X}) << {};", temp(), i == 0 ? "" : "|", vTemp(), i, masks[i], shifts[i]);
++                }
++                println("\t{}.u32[{}] = {}.u32;", v(insn.operands[0]), insn.operands[4], temp());
++            }
++            break;
++
++        case 3: // float16_2 -- x and y into the two halves of one word
++            if (insn.operands[3] != 1)
++                fmt::println("Unexpected float16_2 pack instruction at {:X}", base);
++
++            for (size_t i = 2; i < 4; i++)
++                packHalf((i - 2) + (2 * insn.operands[4]), i);
++            break;
++
+         case 5: // float16_4
+             if (insn.operands[3] != 2 || insn.operands[4] > 2)
+                 fmt::println("Unexpected float16_4 pack instruction at {:X}", base);
+ 
+             for (size_t i = 0; i < 4; i++)
+-            {
+-        		// Strip sign from source
+-        		println("\t{}.u32 = ({}.u32[{}]&0x7FFFFFFF);", temp(), v(insn.operands[1]), i);
+-        		// If |source| is > 65504, clamp output to 0x7FFF, else save 8 exponent bits 
+-        		println("\t{0}.u8[0] = ({1}.f32 != {1}.f32) || ({1}.f32 > 65504.0f) ? 0xFF : (({2}.u32[{3}]&0x7f800000)>>23);", vTemp(), temp(), v(insn.operands[1]), i);
+-        		// If 8 exponent bits were saved, it can only be 0x8E at most
+-        		// If saved, save first 10 bits of mantissa
+-        		println("\t{}.u16 = {}.u8[0] != 0xFF ? (({}.u32[{}]&0x7FE000)>>13) : 0x0;", temp(), vTemp(), v(insn.operands[1]), i);
+-        		// If saved and > 127-15, exponent is converted from 8 to 5-bit by subtracting 0x70
+-        		// If saved but not > 127-15, clamp exponent at 0, add 0x400 to mantissa and shift right by (0x71-exponent)
+-        		// If right shift is greater than 31 bits, manually clamp mantissa to 0 or else the output of the shift will be wrong
+-        		println("\t{0}.u16[{1}] = {2}.u8[0] != 0xFF ? ({2}.u8[0] > 0x70 ? ((({2}.u8[0]-0x70)<<10)+{3}.u16) : (0x71-{2}.u8[0] > 31 ? 0x0 : ((0x400+{3}.u16)>>(0x71-{2}.u8[0])))) : 0x7FFF;", v(insn.operands[0]), i+(2*insn.operands[4]), vTemp(), temp());
+-        		// Add back original sign
+-        		println("\t{}.u16[{}] |= (({}.u32[{}]&0x80000000)>>16);", v(insn.operands[0]), i+(2*insn.operands[4]), v(insn.operands[1]), i);
+-            }
++                packHalf(i + (2 * insn.operands[4]), i);
+             break;
+ 
+         default:
+@@ -2041,6 +2088,7 @@ bool Recompiler::Recompile(
+             break;
+         }
+         break;
++    }
+ 
+     case PPC_INST_VPKSHUS:
+     case PPC_INST_VPKSHUS128:
+@@ -2088,6 +2136,7 @@ bool Recompiler::Recompile(
+         break;
+ 
+     case PPC_INST_VSEL:
++    case PPC_INST_VSEL128:
+         println("\tsimde_mm_store_si128((simde__m128i*){}.u8, simde_mm_or_si128(simde_mm_andnot_si128(simde_mm_load_si128((simde__m128i*){}.u8), simde_mm_load_si128((simde__m128i*){}.u8)), simde_mm_and_si128(simde_mm_load_si128((simde__m128i*){}.u8), simde_mm_load_si128((simde__m128i*){}.u8))));", v(insn.operands[0]), v(insn.operands[3]), v(insn.operands[1]), v(insn.operands[3]), v(insn.operands[2]));
+         break;
+ 
+@@ -2212,6 +2261,31 @@ bool Recompiler::Recompile(
+             println("\t{} = {};", v(insn.operands[0]), vTemp());
+             break;
+ 
++        case 2: // three 10-bit signed normalised components, w in the top two bits
++            // Like the D3D color case this does no arithmetic of its own: each
++            // field is dropped into the mantissa of 3.0f, and the caller
++            // finishes the job with a multiply-add by (511 * 2^-22, -3.0f),
++            // which is why 511 rather than 512 is full scale.
++            //
++            // The packed word is w_z_y_x from the top down: x occupies bits 0..9
++            // and z bits 20..29, which is the order the hardware's shift vector
++            // (0, 10, 20, 30) gives each component. Reading x from the top and z
++            // from the bottom swaps them, and a swapped pair of axes turns every
++            // rotation built out of these into a reflection -- which is what put
++            // MW2's static props, the weapons tables among them, on their sides.
++            //
++            // x, y and z are signed; w is two bits and unsigned, so it is not
++            // sign-extended along with them.
++            {
++                constexpr size_t shifts[] = { 22, 12, 2 };      // x, y, z
++                println("\t{}.u32 = {}.u32[0];", temp(), v(insn.operands[1]));
++                for (size_t i = 0; i < 3; i++)
++                    println("\t{}.u32[{}] = 0x40400000 + uint32_t(int32_t({}.u32 << {}) >> 22);", vTemp(), 3 - i, temp(), shifts[i]);
++                println("\t{}.u32[0] = 0x40400000 + ({}.u32 >> 30);", vTemp(), temp());
++                println("\t{} = {};", v(insn.operands[0]), vTemp());
++            }
++            break;
++
+         default:
+             println("\t__builtin_debugtrap();");
+             break;
+@@ -2263,6 +2337,197 @@ bool Recompiler::Recompile(
+         println("\t{}.u64 = {}.u64 ^ {};", r(insn.operands[0]), r(insn.operands[1]), insn.operands[2] << 16);
+         break;
+ 
++    // ---- Load/store "update" (base-writeback) forms ----
++
++    case PPC_INST_LHZU:
++        println("\t{} = {} + {}.u32;", ea(), int32_t(insn.operands[1]), r(insn.operands[2]));
++        println("\t{}.u64 = PPC_LOAD_U16({});", r(insn.operands[0]), ea());
++        println("\t{}.u32 = {};", r(insn.operands[2]), ea());
++        break;
++
++    case PPC_INST_LHAU:
++        println("\t{} = {} + {}.u32;", ea(), int32_t(insn.operands[1]), r(insn.operands[2]));
++        println("\t{}.s64 = int16_t(PPC_LOAD_U16({}));", r(insn.operands[0]), ea());
++        println("\t{}.u32 = {};", r(insn.operands[2]), ea());
++        break;
++
++    case PPC_INST_LFSU:
++        printSetFlushMode(false);
++        println("\t{} = {} + {}.u32;", ea(), int32_t(insn.operands[1]), r(insn.operands[2]));
++        println("\t{}.u32 = PPC_LOAD_U32({});", temp(), ea());
++        println("\t{}.f64 = double({}.f32);", f(insn.operands[0]), temp());
++        println("\t{}.u32 = {};", r(insn.operands[2]), ea());
++        break;
++
++    case PPC_INST_LFDU:
++        printSetFlushMode(false);
++        println("\t{} = {} + {}.u32;", ea(), int32_t(insn.operands[1]), r(insn.operands[2]));
++        println("\t{}.u64 = PPC_LOAD_U64({});", f(insn.operands[0]), ea());
++        println("\t{}.u32 = {};", r(insn.operands[2]), ea());
++        break;
++
++    case PPC_INST_STHU:
++        println("\t{} = {} + {}.u32;", ea(), int32_t(insn.operands[1]), r(insn.operands[2]));
++        println("\tPPC_STORE_U16({}, {}.u16);", ea(), r(insn.operands[0]));
++        println("\t{}.u32 = {};", r(insn.operands[2]), ea());
++        break;
++
++    case PPC_INST_STFSU:
++        printSetFlushMode(false);
++        println("\t{} = {} + {}.u32;", ea(), int32_t(insn.operands[1]), r(insn.operands[2]));
++        println("\t{}.f32 = float({}.f64);", temp(), f(insn.operands[0]));
++        println("\tPPC_STORE_U32({}, {}.u32);", ea(), temp());
++        println("\t{}.u32 = {};", r(insn.operands[2]), ea());
++        break;
++
++    case PPC_INST_STFDU:
++        printSetFlushMode(false);
++        println("\t{} = {} + {}.u32;", ea(), int32_t(insn.operands[1]), r(insn.operands[2]));
++        println("\tPPC_STORE_U64({}, {}.u64);", ea(), f(insn.operands[0]));
++        println("\t{}.u32 = {};", r(insn.operands[2]), ea());
++        break;
++
++    // ---- Indexed "update" forms (EA = rA + rB, rA written back) ----
++
++    case PPC_INST_LBZUX:
++        println("\t{} = {}.u32 + {}.u32;", ea(), r(insn.operands[1]), r(insn.operands[2]));
++        println("\t{}.u64 = PPC_LOAD_U8({});", r(insn.operands[0]), ea());
++        println("\t{}.u32 = {};", r(insn.operands[1]), ea());
++        break;
++
++    case PPC_INST_LHZUX:
++        println("\t{} = {}.u32 + {}.u32;", ea(), r(insn.operands[1]), r(insn.operands[2]));
++        println("\t{}.u64 = PPC_LOAD_U16({});", r(insn.operands[0]), ea());
++        println("\t{}.u32 = {};", r(insn.operands[1]), ea());
++        break;
++
++    case PPC_INST_LWZUX:
++        println("\t{} = {}.u32 + {}.u32;", ea(), r(insn.operands[1]), r(insn.operands[2]));
++        println("\t{}.u64 = PPC_LOAD_U32({});", r(insn.operands[0]), ea());
++        println("\t{}.u32 = {};", r(insn.operands[1]), ea());
++        break;
++
++    case PPC_INST_LDUX:
++        println("\t{} = {}.u32 + {}.u32;", ea(), r(insn.operands[1]), r(insn.operands[2]));
++        println("\t{}.u64 = PPC_LOAD_U64({});", r(insn.operands[0]), ea());
++        println("\t{}.u32 = {};", r(insn.operands[1]), ea());
++        break;
++
++    case PPC_INST_LFSUX:
++        printSetFlushMode(false);
++        println("\t{} = {}.u32 + {}.u32;", ea(), r(insn.operands[1]), r(insn.operands[2]));
++        println("\t{}.u32 = PPC_LOAD_U32({});", temp(), ea());
++        println("\t{}.f64 = double({}.f32);", f(insn.operands[0]), temp());
++        println("\t{}.u32 = {};", r(insn.operands[1]), ea());
++        break;
++
++    case PPC_INST_STHUX:
++        println("\t{} = {}.u32 + {}.u32;", ea(), r(insn.operands[1]), r(insn.operands[2]));
++        println("\tPPC_STORE_U16({}, {}.u16);", ea(), r(insn.operands[0]));
++        println("\t{}.u32 = {};", r(insn.operands[1]), ea());
++        break;
++
++    case PPC_INST_STDUX:
++        println("\t{} = {}.u32 + {}.u32;", ea(), r(insn.operands[1]), r(insn.operands[2]));
++        println("\tPPC_STORE_U64({}, {}.u64);", ea(), r(insn.operands[0]));
++        println("\t{}.u32 = {};", r(insn.operands[1]), ea());
++        break;
++
++    // ---- Byte-reversed halfword load ----
++
++    case PPC_INST_LHBRX:
++        print("\t{}.u64 = __builtin_bswap16(PPC_LOAD_U16(", r(insn.operands[0]));
++        if (insn.operands[1] != 0)
++            print("{}.u32 + ", r(insn.operands[1]));
++        println("{}.u32));", r(insn.operands[2]));
++        break;
++
++    // ---- Cache hint, no observable effect under this memory model ----
++
++    case PPC_INST_DCBST:
++        // no op
++        break;
++
++    // ---- Branch on decremented CTR == 0 and condition false ----
++
++    case PPC_INST_BDZF:
++    {
++        constexpr std::string_view fields[] = { "lt", "gt", "eq", "so" };
++        println("\t--{}.u64;", ctr());
++        println("\tif ({}.u32 == 0 && !{}.{}) goto loc_{:X};", ctr(), cr(insn.operands[0] / 4), fields[insn.operands[0] % 4], insn.operands[1]);
++        break;
++    }
++
++    // ---- Integer ALU ----
++
++    case PPC_INST_EQV:
++        println("\t{}.u64 = ~({}.u64 ^ {}.u64);", r(insn.operands[0]), r(insn.operands[1]), r(insn.operands[2]));
++        if (strchr(insn.opcode->name, '.'))
++            println("\t{}.compare<int32_t>({}.s32, 0, {});", cr(0), r(insn.operands[0]), xer());
++        break;
++
++    case PPC_INST_ADDC:
++        println("\t{}.u8 = {}.u32 + {}.u32 < {}.u32;", temp(), r(insn.operands[1]), r(insn.operands[2]), r(insn.operands[1]));
++        println("\t{}.u64 = {}.u64 + {}.u64;", r(insn.operands[0]), r(insn.operands[1]), r(insn.operands[2]));
++        println("\t{}.ca = {}.u8;", xer(), temp());
++        if (strchr(insn.opcode->name, '.'))
++            println("\t{}.compare<int32_t>({}.s32, 0, {});", cr(0), r(insn.operands[0]), xer());
++        break;
++
++    case PPC_INST_ADDME:
++        // rD = rA + CA - 1; carry out iff rA + CA != 0
++        println("\t{}.u8 = ({}.u32 != 0) | ({}.ca != 0);", temp(), r(insn.operands[1]), xer());
++        println("\t{}.s64 = {}.s64 + {}.ca - 1;", r(insn.operands[0]), r(insn.operands[1]), xer());
++        println("\t{}.ca = {}.u8;", xer(), temp());
++        if (strchr(insn.opcode->name, '.'))
++            println("\t{}.compare<int32_t>({}.s32, 0, {});", cr(0), r(insn.operands[0]), xer());
++        break;
++
++    case PPC_INST_SUBFZE:
++        // rD = ~rA + CA; carry out iff ~rA + CA wraps
++        println("\t{}.u8 = ~{}.u32 + {}.ca < {}.ca;", temp(), r(insn.operands[1]), xer(), xer());
++        println("\t{}.u64 = ~{}.u64 + {}.ca;", r(insn.operands[0]), r(insn.operands[1]), xer());
++        println("\t{}.ca = {}.u8;", xer(), temp());
++        if (strchr(insn.opcode->name, '.'))
++            println("\t{}.compare<int32_t>({}.s32, 0, {});", cr(0), r(insn.operands[0]), xer());
++        break;
++
++    case PPC_INST_MULHDU:
++        println("\t{}.u64 = ((unsigned __int128){}.u64 * (unsigned __int128){}.u64) >> 64;", r(insn.operands[0]), r(insn.operands[1]), r(insn.operands[2]));
++        if (strchr(insn.opcode->name, '.'))
++            println("\t{}.compare<int32_t>({}.s32, 0, {});", cr(0), r(insn.operands[0]), xer());
++        break;
++
++    // ---- Floating point ----
++
++    case PPC_INST_FRSQRTE:
++        printSetFlushMode(false);
++        println("\t{}.f64 = 1.0 / sqrt({}.f64);", f(insn.operands[0]), f(insn.operands[1]));
++        break;
++
++    // ---- VMX ----
++
++    case PPC_INST_VSUBUWS:
++        // TODO: vectorize
++        for (size_t i = 0; i < 4; i++)
++            println("\t{}.u32[{}] = {}.u32[{}] > {}.u32[{}] ? {}.u32[{}] - {}.u32[{}] : 0;", v(insn.operands[0]), i, v(insn.operands[1]), i, v(insn.operands[2]), i, v(insn.operands[1]), i, v(insn.operands[2]), i);
++        break;
++
++    case PPC_INST_VPKSWSS:
++    case PPC_INST_VPKSWSS128:
++        // NOTE: operands swapped to account for the full vector reversal
++        println("\tsimde_mm_store_si128((simde__m128i*){}.u8, simde_mm_packs_epi32(simde_mm_load_si128((simde__m128i*){}.s32), simde_mm_load_si128((simde__m128i*){}.s32)));", v(insn.operands[0]), v(insn.operands[2]), v(insn.operands[1]));
++        break;
++
++    case PPC_INST_VCFPUXWS128:
++        printSetFlushMode(true);
++        print("\tsimde_mm_store_si128((simde__m128i*){}.u32, simde_mm_vctuxs(", v(insn.operands[0]));
++        if (insn.operands[2] != 0)
++            println("simde_mm_mul_ps(simde_mm_load_ps({}.f32), simde_mm_set1_ps({}))));", v(insn.operands[1]), 1u << insn.operands[2]);
++        else
++            println("simde_mm_load_ps({}.f32)));", v(insn.operands[1]));
++        break;
++
+     default:
+         return false;
+     }
+diff --git a/XenonUtils/ppc_context.h b/XenonUtils/ppc_context.h
+index 31a86cd..105f357 100644
+--- a/XenonUtils/ppc_context.h
++++ b/XenonUtils/ppc_context.h
+@@ -682,6 +682,22 @@ inline simde__m128i simde_mm_vctsxs(simde__m128 src1)
+     return simde_mm_andnot_si128(simde_mm_castps_si128(xmm2), simde_mm_castps_si128(dest));
+ }
+ 
++inline simde__m128i simde_mm_vctuxs(simde__m128 src1)
++{
++    // Convert float -> unsigned word with saturation, NaN -> 0.
++    simde__m128 ord = simde_mm_cmpord_ps(src1, src1);
++    simde__m128 x = simde_mm_and_ps(src1, ord);
++    x = simde_mm_max_ps(x, simde_mm_set1_ps(0.0f));
++    x = simde_mm_min_ps(x, simde_mm_set1_ps(4294967040.0f)); // largest float <= UINT32_MAX
++    // cvttps_epi32 is signed, so split at 2^31 and re-add the bias afterwards.
++    simde__m128 bias = simde_mm_set1_ps(2147483648.0f);
++    simde__m128 hiMask = simde_mm_cmpge_ps(x, bias);
++    simde__m128i lo = simde_mm_cvttps_epi32(simde_mm_andnot_ps(hiMask, x));
++    simde__m128i hi = simde_mm_cvttps_epi32(simde_mm_and_ps(hiMask, simde_mm_sub_ps(x, bias)));
++    hi = simde_mm_add_epi32(hi, simde_mm_and_si128(simde_mm_castps_si128(hiMask), simde_mm_set1_epi32(INT_MIN)));
++    return simde_mm_or_si128(lo, hi);
++}
++
+ inline simde__m128i simde_mm_vsr(simde__m128i a, simde__m128i b)
+ {
+     b = simde_mm_srli_epi64(simde_mm_slli_epi64(b, 61), 61);
+@@ -700,4 +716,13 @@ inline uint64_t __rdtsc()
+ #   error "Missing implementation for __rdtsc()"
+ #endif
+ 
++// What mftb reads. The console's timebase runs at 50 MHz and titles assume it
++// without asking -- MW2's server thread turns ticks into milliseconds with a
++// constant 1/50000 -- so the host supplies a counter at that rate rather than
++// its own cycle counter.
++#ifndef PPC_QUERY_TIMEBASE
++uint64_t PPC_QueryTimebase();
++#define PPC_QUERY_TIMEBASE() PPC_QueryTimebase()
++#endif
++
+ #endif
