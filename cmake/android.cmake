@@ -52,7 +52,10 @@ if(EXISTS "${MW2_ADRENOTOOLS_DIR}/CMakeLists.txt")
     # have to be in the apk beside libmw2.so. Building them as part of this
     # build is what puts them there: the Gradle plugin packages every shared
     # library this CMake project produces.
-    foreach(hook main_hook hook_impl)
+    # main_hook and hook_impl are the loader itself; file_redirect_hook is
+    # what ADRENOTOOLS_DRIVER_FILE_REDIRECT needs (runtime/android/driver.cpp),
+    # and a driver that asks for it and cannot find it does not load.
+    foreach(hook main_hook hook_impl file_redirect_hook)
         if(TARGET ${hook})
             add_dependencies(mw2 ${hook})
         endif()

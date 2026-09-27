@@ -225,6 +225,17 @@ void* android::driver::Open(std::string& error)
         {
             const char* why = dlerror();
             LOGW("driver: %s would not load (%s)", path.c_str(), why ? why : "?");
+#if !MW2_HAVE_ADRENOTOOLS
+            // Worth spelling out, because the message above names a missing
+            // system library and reads like the driver's fault. It is not:
+            // a Turnip build links against libcutils and the rest of
+            // /system/lib64, which an app's own linker namespace cannot see.
+            // Giving it a namespace that can is the whole job of
+            // libadrenotools, and this build was made without it.
+            LOGW("driver: this build has no libadrenotools, so an imported driver can only be"
+                 " loaded if it needs nothing from /system -- which a Turnip build does."
+                 " Run android/fetch_deps.sh and build again.");
+#endif
         }
         g_customFailed = true;
     }

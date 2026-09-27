@@ -134,6 +134,22 @@ jobs:
           echo "ANDROID_NDK_HOME=$ANDROID_HOME/ndk/$NDK_VERSION" >> "$GITHUB_ENV"
           echo "installed NDK $NDK_VERSION"
 
+      # Without this the app runs only on the driver the phone shipped with:
+      # a Turnip build links against libcutils and the rest of /system/lib64,
+      # which an app's linker namespace cannot see, and a plain dlopen of one
+      # fails with "library libcutils.so not found". libadrenotools exists to
+      # give the driver a namespace that can.
+      - name: Cache libadrenotools
+        id: adrenotools_cache
+        uses: actions/cache@v4
+        with:
+          path: third_party/libadrenotools
+          key: adrenotools-${{ hashFiles('android/fetch_deps.sh') }}-v1
+
+      - name: Fetch libadrenotools
+        if: steps.adrenotools_cache.outputs.cache-hit != 'true'
+        run: ./android/fetch_deps.sh
+
       # ---- your copy of the game ------------------------------------------
       - name: Fetch the game's executables
         id: fetch
