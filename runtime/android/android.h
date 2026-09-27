@@ -80,6 +80,11 @@ namespace android
     void LogLine(char level, const char* text);
     void OpenLogFile(const char* path);
 
+    // Replaces stdout and stderr with a pipe read back into the log. What
+    // the runtime prints rather than logs -- the crash handler's backtrace
+    // above all -- would otherwise go to /dev/null on a phone.
+    void CaptureStandardStreams();
+
     // ---- what the frame-rate counter shows --------------------------------
     struct Stats
     {

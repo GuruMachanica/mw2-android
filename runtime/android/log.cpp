@@ -11,12 +11,15 @@
 
 #include <android/log.h>
 
+#include <cerrno>
 #include <cstdarg>
 #include <cstdio>
 #include <cstring>
 #include <deque>
 #include <mutex>
+#include <pthread.h>
 #include <string>
+#include <unistd.h>
 
 namespace
 {
@@ -34,8 +37,85 @@ void android::OpenLogFile(const char* path)
     if (!path || !*path) return;
     std::lock_guard lock(g_lock);
     if (g_file) { std::fclose(g_file); g_file = nullptr; }
-    g_file = std::fopen(path, "w");
-    if (g_file) std::setvbuf(g_file, nullptr, _IOLBF, 0);
+
+    // Appended, not truncated. The launcher and the run are two processes
+    // (":game" in the manifest) and each opens a log of its own -- but even
+    // one process starting twice used to wipe the evidence of why it ended
+    // the first time, which is the one thing the file exists for. Trimmed
+    // when it grows past a few megabytes, so it cannot fill the phone.
+    if (std::FILE* existing = std::fopen(path, "rb"))
+    {
+        std::fseek(existing, 0, SEEK_END);
+        const long size = std::ftell(existing);
+        std::fclose(existing);
+        if (size > 4 * 1024 * 1024) std::remove(path);
+    }
+
+    g_file = std::fopen(path, "a");
+    if (!g_file) return;
+    std::setvbuf(g_file, nullptr, _IOLBF, 0);
+    std::fprintf(g_file, "\n===== new run, pid %d =====\n", int(getpid()));
+    std::fflush(g_file);
+}
+
+// ---- whatever the runtime prints rather than logs -------------------------
+//
+// crash.cpp writes the guest's backtrace to stderr, as it does on a desktop,
+// and so do abort(), assert() and the C++ runtime on an uncaught exception.
+// On Android none of that goes anywhere: an app's stdout and stderr are
+// /dev/null unless the device has been told otherwise. So the two are
+// replaced with a pipe and read back into this log, which is the difference
+// between "it crashed" and a stack trace naming the guest function.
+namespace
+{
+    int g_capture[2] = { -1, -1 };
+
+    void* DrainStandardStreams(void*)
+    {
+        std::string line;
+        char buffer[512];
+        for (;;)
+        {
+            const ssize_t got = read(g_capture[0], buffer, sizeof buffer);
+            if (got <= 0)
+            {
+                if (got < 0 && errno == EINTR) continue;
+                break;
+            }
+            for (ssize_t i = 0; i < got; i++)
+            {
+                if (buffer[i] == '\n')
+                {
+                    if (!line.empty()) android::LogLine('E', line.c_str());
+                    line.clear();
+                }
+                else if (line.size() < 2000)
+                {
+                    line.push_back(buffer[i]);
+                }
+            }
+        }
+        return nullptr;
+    }
+}
+
+void android::CaptureStandardStreams()
+{
+    if (g_capture[0] >= 0) return;
+    if (pipe(g_capture) != 0) return;
+
+    // Unbuffered, so a crash handler's last words are not still sitting in
+    // a buffer when the process dies.
+    std::setvbuf(stdout, nullptr, _IONBF, 0);
+    std::setvbuf(stderr, nullptr, _IONBF, 0);
+    dup2(g_capture[1], STDOUT_FILENO);
+    dup2(g_capture[1], STDERR_FILENO);
+
+    pthread_t reader;
+    if (pthread_create(&reader, nullptr, &DrainStandardStreams, nullptr) == 0)
+    {
+        pthread_detach(reader);
+    }
 }
 
 void android::LogLine(char level, const char* text)

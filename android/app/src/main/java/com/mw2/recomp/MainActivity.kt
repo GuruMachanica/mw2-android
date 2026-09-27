@@ -161,17 +161,26 @@ class MainActivity : AppCompatActivity() {
     }
 
     private fun showLog() {
-        val tail = if (nativeReady) safely("") { NativeBridge.nativeLogTail() } else ""
         val text = buildString {
-            val crash = Trail.lastCrash(this@MainActivity)
-            if (crash.isNotEmpty()) append(crash).append("\n\n---\n\n")
-            val trail = Trail.trail(this@MainActivity)
-            if (trail.isNotEmpty()) append(trail).append("\n---\n\n")
-            append(
-                tail.ifBlank {
-                    File(filesDir, "mw2.log").let { if (it.exists()) it.readTextTail(60_000) else "" }
+            // The run's log first: when something goes wrong it is almost
+            // always the interesting one, and the launcher's own is short.
+            for (name in listOf("game.log", "launcher.log")) {
+                val file = File(filesDir, name)
+                if (!file.exists()) continue
+                append("===== ").append(name).append(" =====\n")
+                append(file.readTextTail(60_000)).append("\n\n")
+            }
+            for (name in listOf("last-crash-game.txt", "last-crash-launcher.txt")) {
+                val file = File(filesDir, name)
+                if (file.exists()) {
+                    append("===== ").append(name).append(" =====\n")
+                    append(file.readTextTail(8_000)).append("\n\n")
                 }
-            )
+            }
+            if (nativeReady) {
+                val tail = safely("") { NativeBridge.nativeLogTail() }
+                if (tail.isNotBlank()) append("===== this session =====\n").append(tail)
+            }
         }.ifBlank { getString(R.string.log_empty) }
 
         val body = TextView(this)

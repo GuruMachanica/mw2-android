@@ -42,9 +42,24 @@ class MW2Application : Application() {
  */
 object Trail {
 
-    private const val CRASH = "last-crash.txt"
-    private const val TRAIL = "boot-trail.txt"
     private const val LIMIT = 64 * 1024
+
+    /**
+     * The launcher and the run are separate processes and both write here.
+     * Each keeps its own pair of files, or one clearing its trail on a
+     * successful start would throw away the other's evidence of a crash.
+     */
+    private val suffix: String by lazy {
+        val name = try {
+            File("/proc/self/cmdline").readText().trim('\u0000')
+        } catch (_: Throwable) {
+            ""
+        }
+        if (name.endsWith(":game")) "game" else "launcher"
+    }
+
+    private val CRASH: String get() = "last-crash-$suffix.txt"
+    private val TRAIL: String get() = "boot-trail-$suffix.txt"
 
     fun install(context: Context) {
         val previous = Thread.getDefaultUncaughtExceptionHandler()

@@ -31,6 +31,7 @@
 #include <atomic>
 #include <chrono>
 #include <cstdlib>
+#include <cstdio>
 #include <cstring>
 #include <mutex>
 #include <string>
@@ -237,8 +238,23 @@ MW2_NATIVE(jboolean, nativeInit)(JNIEnv* env, jobject, jstring filesDir, jstring
     }
     android::input::detail::SetRumbleSink(RumbleSink);
 
-    const std::string logPath = g_paths.files + "/mw2.log";
+    // A log per process. The launcher and the run are separate processes
+    // and both used to open the same file: whichever started second wiped
+    // the other's, and the one that mattered -- the run's -- was always the
+    // one lost.
+    std::string which = "launcher";
+    if (std::FILE* cmdline = std::fopen("/proc/self/cmdline", "rb"))
+    {
+        char name[256] = {};
+        const size_t read = std::fread(name, 1, sizeof(name) - 1, cmdline);
+        std::fclose(cmdline);
+        if (read > 0 && std::strstr(name, ":game")) which = "game";
+    }
+    const std::string logPath = g_paths.files + "/" + which + ".log";
     android::OpenLogFile(logPath.c_str());
+    // Everything the runtime prints rather than logs, the crash handler's
+    // backtrace above all, now reaches that file instead of /dev/null.
+    android::CaptureStandardStreams();
     LOGI("--- MW2 on Android ---");
     LOGI("android: files %s", g_paths.files.c_str());
     LOGI("android: external %s", g_paths.external.c_str());
