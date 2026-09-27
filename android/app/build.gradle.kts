@@ -8,12 +8,26 @@ plugins {
 // the desktop executable makes libmw2.so, with ANDROID set (cmake/android.cmake).
 val repositoryRoot = file("../..")
 
+// What a build machine may set, so that a CI job does not need a patched copy
+// of this file (.github/workflows/android.yml):
+//
+//   MW2_NDK_VERSION        which NDK to use, when the runner has another one
+//   MW2_NATIVE_OPTIMISATION  -O2 compiles the recompiled tree a good deal
+//                          quicker than -O3 and runs within a few percent of
+//                          it; a runner with six hours cares about that
+//   MW2_COMPILER_LAUNCHER  ccache, usually
+//   MW2_XEX_SHA256_SP/MP   the hashes the installer checks a player's own
+//                          copy against, for a build that has the recompiled
+//                          sources but not the disc they came from
+//   MW2_KEYSTORE and friends  a signing key, so the apk is installable
+fun setting(name: String): String? = System.getenv(name)?.trim()?.ifEmpty { null }
+
 android {
     namespace = "com.mw2.recomp"
     compileSdk = 35
     // r27 is the first NDK whose linker aligns a library for 16 KB pages by
     // default and whose clang is new enough for the recompiled code's size.
-    ndkVersion = "27.2.12479018"
+    ndkVersion = setting("MW2_NDK_VERSION") ?: "27.2.12479018"
 
     defaultConfig {
         applicationId = "com.mw2.recomp"
@@ -42,7 +56,18 @@ android {
                     "-DMW2_LOGGING=ON",
                     "-DCMAKE_BUILD_TYPE=Release",
                 )
-                cppFlags += "-O3"
+                setting("MW2_COMPILER_LAUNCHER")?.let {
+                    arguments += listOf(
+                        "-DCMAKE_C_COMPILER_LAUNCHER=$it",
+                        "-DCMAKE_CXX_COMPILER_LAUNCHER=$it",
+                    )
+                }
+                val sp = setting("MW2_XEX_SHA256_SP")
+                val mp = setting("MW2_XEX_SHA256_MP")
+                if (sp != null && mp != null) {
+                    arguments += listOf("-DMW2_XEX_SHA256_SP=$sp", "-DMW2_XEX_SHA256_MP=$mp")
+                }
+                cppFlags += (setting("MW2_NATIVE_OPTIMISATION") ?: "-O3")
             }
         }
     }
@@ -76,8 +101,26 @@ android {
         }
     }
 
+    // A release apk with no key is not installable, and an app nobody can
+    // install is not a build. A key given in the environment is used; without
+    // one the debug key signs it, which Android accepts and which makes it
+    // plain that this is not a store build.
+    signingConfigs {
+        val keystorePath = setting("MW2_KEYSTORE")
+        if (keystorePath != null && file(keystorePath).exists()) {
+            create("supplied") {
+                storeFile = file(keystorePath)
+                storePassword = setting("MW2_KEYSTORE_PASSWORD")
+                keyAlias = setting("MW2_KEY_ALIAS")
+                keyPassword = setting("MW2_KEY_PASSWORD") ?: setting("MW2_KEYSTORE_PASSWORD")
+            }
+        }
+    }
+
     buildTypes {
         release {
+            signingConfig = signingConfigs.findByName("supplied")
+                ?: signingConfigs.getByName("debug")
             isMinifyEnabled = true
             isShrinkResources = true
             proguardFiles(getDefaultProguardFile("proguard-android-optimize.txt"), "proguard-rules.pro")

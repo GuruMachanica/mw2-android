@@ -115,17 +115,32 @@ endif()
 target_include_directories(mw2 PRIVATE "${CMAKE_SOURCE_DIR}/runtime")
 # The installer accepts only the executables this build was recompiled from
 # (runtime/install/install.cpp); both, since either executable installs both.
-foreach(xex default default_mp)
-    set(xex_path "${CMAKE_SOURCE_DIR}/mw2/${xex}.xex")
-    if(NOT EXISTS "${xex_path}")
-        message(FATAL_ERROR "${xex_path} is missing -- build.sh extracts it from the ISO")
-    endif()
-    set_property(DIRECTORY APPEND PROPERTY CMAKE_CONFIGURE_DEPENDS "${xex_path}")
-    file(SHA256 "${xex_path}" xex_sha256)
-    list(APPEND MW2_XEX_HASHES "${xex_sha256}")
-endforeach()
-list(GET MW2_XEX_HASHES 0 MW2_XEX_SHA256_SP)
-list(GET MW2_XEX_HASHES 1 MW2_XEX_SHA256_MP)
+#
+# Normally the two hashes are taken from mw2/. A build that has the recompiled
+# sources but not the disc -- the Android job, which compiles a tree another
+# machine produced -- can be handed them instead:
+#   -DMW2_XEX_SHA256_SP=<64 hex> -DMW2_XEX_SHA256_MP=<64 hex>
+if(MW2_XEX_SHA256_SP AND MW2_XEX_SHA256_MP)
+    foreach(given SP MP)
+        if(NOT MW2_XEX_SHA256_${given} MATCHES "^[0-9a-fA-F]{64}$")
+            message(FATAL_ERROR "MW2_XEX_SHA256_${given} is not a sha256: ${MW2_XEX_SHA256_${given}}")
+        endif()
+    endforeach()
+    message(STATUS "XEX hashes given on the command line; mw2/ is not needed")
+else()
+    foreach(xex default default_mp)
+        set(xex_path "${CMAKE_SOURCE_DIR}/mw2/${xex}.xex")
+        if(NOT EXISTS "${xex_path}")
+            message(FATAL_ERROR "${xex_path} is missing -- build.sh extracts it from the ISO"
+                                " (or pass -DMW2_XEX_SHA256_SP= and -DMW2_XEX_SHA256_MP=)")
+        endif()
+        set_property(DIRECTORY APPEND PROPERTY CMAKE_CONFIGURE_DEPENDS "${xex_path}")
+        file(SHA256 "${xex_path}" xex_sha256)
+        list(APPEND MW2_XEX_HASHES "${xex_sha256}")
+    endforeach()
+    list(GET MW2_XEX_HASHES 0 MW2_XEX_SHA256_SP)
+    list(GET MW2_XEX_HASHES 1 MW2_XEX_SHA256_MP)
+endif()
 target_compile_definitions(mw2 PRIVATE
     MW2_XEX_SHA256_SP="${MW2_XEX_SHA256_SP}" MW2_XEX_SHA256_MP="${MW2_XEX_SHA256_MP}")
 if(WIN32)

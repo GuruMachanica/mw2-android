@@ -17,6 +17,9 @@
 #   Without the ISO, mw2/default.xex and mw2/default_mp.xex are enough to build;
 #   the game data is only extracted when the ISO is there. CMAKE_EXTRA is
 #   passed to the configure step (a compiler launcher, for instance).
+#   RECOMPILE_ONLY=1 stops after step 7, with the recompiled tree written and
+#   nothing built from it: what the Android build wants, since Gradle compiles
+#   that tree itself for the phone (.github/workflows/android.yml).
 set -e
 ROOT=$(cd "$(dirname "$0")" && pwd)
 cd "$ROOT"
@@ -113,6 +116,11 @@ echo "==> 7. generate declarations + kernel import stubs (into $PPC/)"
 python3 tools/genshared.py
 python3 tools/gen_kernel_stubs.py
 
+fi
+
+if [ -n "$RECOMPILE_ONLY" ] && [ "$RECOMPILE_ONLY" != 0 ]; then
+    echo "==> done: $PPC/ holds $(ls "$PPC" | wc -l) files; nothing built from it (RECOMPILE_ONLY)"
+    exit 0
 fi
 
 echo "==> 8. build the runtime + recompiled game"

@@ -41,7 +41,13 @@ cd android
 ./gradlew assembleCampaignRelease        # or assembleMultiplayerRelease
 ```
 
-The apk lands in `android/app/build/outputs/apk/campaign/release/`.
+The apk lands in `android/app/build/outputs/apk/campaign/release/`. No local
+toolchain? The same build runs on GitHub Actions from a link to your copy of
+the game -- see "Building it on GitHub Actions" below.
+
+`android/` has no Gradle wrapper checked in (the jar is a binary). Android
+Studio makes one on first open; from a terminal, `gradle wrapper` once with
+any Gradle 8.1x, or just use `gradle` directly as the CI job does.
 
 Two product flavours, because the disc carries two executables and each is
 recompiled into a tree of its own:
@@ -56,6 +62,83 @@ Both can be installed at once; they share nothing but the source.
 `assembleCampaignDebug` builds far quicker only in the sense that it skips
 the shrinker -- the native compile is the same work. For iterating on the
 app's Kotlin, build once and then use `installCampaignDebug`.
+
+## Building it on GitHub Actions
+
+`.github/workflows/android.yml` does all of the above on a runner, from a
+link to your own copy of the game. Actions tab -> **android** -> *Run
+workflow*.
+
+It asks for:
+
+| | |
+| --- | --- |
+| **Link to default.xex** | Google Drive, a Hugging Face repository, or any direct URL |
+| **Link to default_mp.xex** | both are needed whichever app you build: the installer checks a player's copy against each, so the build has to know both hashes |
+| **Link to the disc image** | instead of the two, if you would rather hand over the whole thing. Large -- Hugging Face serves it, Drive generally refuses |
+| **Which app** | campaign, multiplayer, or both |
+| **How hard the compiler works** | `-O2` by default. `-O3` is a few percent quicker to run and a good deal slower to build, which matters when a job is given six hours |
+
+A link typed into the form is written into the run's record, where anyone who
+can read this repository's Actions can see it. To keep it out of there, put
+it in **Settings -> Secrets and variables -> Actions** instead and leave the
+form empty:
+
+| Secret | For |
+| --- | --- |
+| `DEFAULT_XEX_URL`, `DEFAULT_MP_XEX_URL` | the two executables |
+| `ISO_URL` | the disc image, if you use one instead |
+| `HF_TOKEN` | a private Hugging Face repository |
+| `KEYSTORE_BASE64`, `KEYSTORE_PASSWORD`, `KEY_ALIAS`, `KEY_PASSWORD` | signing with your own key. Without them the debug key signs it, which installs perfectly well and is honest about what it is |
+
+### What the links may look like
+
+Anything these resolve to is identified by its first bytes, not its name, so
+a file that arrives called `xex.bin` is still recognised -- and a zip holding
+both executables is unpacked and both are taken out of it.
+
+```
+https://drive.google.com/file/d/<id>/view?usp=sharing     Share -> anyone with the link
+https://drive.google.com/uc?export=download&id=<id>
+https://huggingface.co/<you>/<repo>/blob/main/default.xex        a file page
+https://huggingface.co/datasets/<you>/<repo>/resolve/main/default_mp.xex
+https://your-server/whatever/default.xex
+```
+
+Drive's "this file is too large to scan" page is answered on your behalf. Its
+daily download quota is not something the job can do anything about: if Drive
+starts refusing, the run says so plainly, and a Hugging Face repository has no
+such limit.
+
+The same script works by hand:
+
+```sh
+python3 tools/fetch_asset.py --into mw2 \
+  "default.xex=https://..." "default_mp.xex=https://..."
+TITLE=sp ./build.sh
+```
+
+### How long, and what happens when it runs out of time
+
+The first run is hours: two million lines of generated C++, compiled for
+arm64 on four cores. A job is allowed six, and a cold run can reach the end
+of them.
+
+Nothing is lost when it does. Three things are cached:
+
+- the **recompiled tree** (`ppc/`), keyed on the executables themselves, so a
+  second run with the same copy of the game skips the recompiler entirely;
+- the **compiler cache**, saved even when the job fails or is cut off, so the
+  next run picks up the objects the last one finished;
+- the XenonRecomp build.
+
+So: start it again. Each run gets further, and once the tree is cached and
+warm, a build takes minutes.
+
+The game's own files never leave the runner and never reach an artifact --
+they are deleted as soon as the recompiler has finished with them, and the
+apk is built from the recompiled C++ and the two hashes alone
+(`-DMW2_XEX_SHA256_SP=`, `-DMW2_XEX_SHA256_MP=`).
 
 ## Getting the game onto the phone
 

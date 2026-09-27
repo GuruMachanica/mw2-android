@@ -1,0 +1,317 @@
+# Builds the Android apk from a link to your own copy of the game.
+#
+# The disc's executables are not in this repository and cannot be. You put
+# default.xex and default_mp.xex somewhere you control -- Google Drive, a
+# Hugging Face repository, any web server -- and give the link here; the job
+# fetches them, recompiles them, and hands back an apk.
+#
+# Two ways to give the links:
+#
+#   in the form below     quickest, but the link is written into the run's
+#                         record, where anyone who can see this repository's
+#                         Actions can read it. Fine for an unlisted link you
+#                         do not mind losing.
+#   as repository secrets  Settings -> Secrets and variables -> Actions:
+#                         DEFAULT_XEX_URL, DEFAULT_MP_XEX_URL, and ISO_URL if
+#                         you would rather hand over the whole disc image.
+#                         Leave the form empty and these are used. HF_TOKEN
+#                         is sent to Hugging Face, for a private repository.
+#
+# What to expect: the first run is long -- two million lines of generated C++
+# compiled for arm64 -- and may well run out of the six hours a job is given.
+# Nothing is lost when it does: the recompiled tree and the compiler cache are
+# both kept, so starting it again carries on rather than beginning afresh.
+# The second run of an unchanged tree takes minutes.
+name: android
+
+on:
+  workflow_dispatch:
+    inputs:
+      default_xex_url:
+        description: "Link to default.xex (Drive / Hugging Face / direct). Empty: the DEFAULT_XEX_URL secret."
+        required: false
+        default: ""
+      default_mp_xex_url:
+        description: "Link to default_mp.xex. Both executables are needed, whichever app you build."
+        required: false
+        default: ""
+      iso_url:
+        description: "Link to the disc image instead of the two executables. Large; Hugging Face handles it, Drive usually will not."
+        required: false
+        default: ""
+      title:
+        description: "Which app to build"
+        type: choice
+        options: [campaign, multiplayer, both]
+        default: campaign
+      build_type:
+        description: "release is what you install; debug builds quicker and logs more"
+        type: choice
+        options: [release, debug]
+        default: release
+      optimisation:
+        description: "How hard the compiler works on the recompiled code"
+        type: choice
+        options: ["-O2", "-O1", "-O3"]
+        default: "-O2"
+      draft_release:
+        description: "Also draft a GitHub release with the apk"
+        type: boolean
+        default: false
+
+permissions:
+  contents: write
+
+env:
+  NDK_VERSION: "27.2.12479018"
+  CCACHE_DIR: ${{ github.workspace }}/.ccache
+  CCACHE_BASEDIR: ${{ github.workspace }}
+  CCACHE_MAXSIZE: 5G
+  CCACHE_COMPILERCHECK: content
+  CCACHE_SLOPPINESS: time_macros,include_file_mtime,include_file_ctime
+
+jobs:
+  apk:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 355
+
+    steps:
+      - uses: actions/checkout@v4
+
+      # The image ships with a lot this build has no use for, and the
+      # recompiled tree wants every gigabyte.
+      - name: Make room on the disk
+        run: |
+          echo "before:"; df -h / | tail -1
+          sudo rm -rf /usr/share/dotnet /usr/local/lib/android/sdk/ndk \
+                      /opt/ghc /usr/local/share/boost /usr/share/swift \
+                      /usr/local/lib/node_modules /opt/hostedtoolcache/CodeQL || true
+          sudo apt-get clean
+          echo "after:"; df -h / | tail -1
+
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: "17"
+
+      - name: Install the toolchain
+        run: |
+          sudo apt-get update
+          # clang-18 builds XenonRecomp, which runs here. The NDK's own clang
+          # builds the game, for the phone.
+          sudo apt-get install -y clang-18 lld-18 ninja-build ccache cmake \
+                                  python3 p7zip-full
+
+      - name: Install the NDK
+        run: |
+          sdkmanager="$ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager"
+          yes | "$sdkmanager" --licenses > /dev/null 2>&1 || true
+          "$sdkmanager" --install "ndk;$NDK_VERSION" "platforms;android-35" \
+                                  "build-tools;35.0.0" "cmake;3.22.1" > /dev/null
+          echo "ANDROID_NDK_HOME=$ANDROID_HOME/ndk/$NDK_VERSION" >> "$GITHUB_ENV"
+          echo "installed NDK $NDK_VERSION"
+
+      # ---- your copy of the game ------------------------------------------
+      - name: Fetch the game's executables
+        id: fetch
+        env:
+          # A link handed in through the form, or the secret when the form was
+          # left empty. Either way it is masked out of the log below.
+          XEX_URL: ${{ inputs.default_xex_url || secrets.DEFAULT_XEX_URL }}
+          MP_URL: ${{ inputs.default_mp_xex_url || secrets.DEFAULT_MP_XEX_URL }}
+          ISO_URL: ${{ inputs.iso_url || secrets.ISO_URL }}
+          HF_TOKEN: ${{ secrets.HF_TOKEN }}
+        run: |
+          set -euo pipefail
+          links=()
+          for pair in "default.xex=$XEX_URL" "default_mp.xex=$MP_URL" "game.iso=$ISO_URL"; do
+            url=${pair#*=}
+            if [ -n "$url" ]; then
+              echo "::add-mask::$url"
+              links+=("$pair")
+            fi
+          done
+          if [ ${#links[@]} -eq 0 ]; then
+            echo "::error::No link given. Fill the form in, or set the DEFAULT_XEX_URL and DEFAULT_MP_XEX_URL secrets."
+            exit 1
+          fi
+          # A disc image carries both executables, so nothing is demanded up
+          # front; two separate links have to be both.
+          required=()
+          if [ -z "$ISO_URL" ]; then
+            required=(--require default.xex,default_mp.xex)
+          fi
+          python3 tools/fetch_asset.py --into mw2 --github-output "${required[@]}" "${links[@]}"
+
+      # ---- the recompiled C++ ---------------------------------------------
+      # Keyed on the executables themselves and on everything that decides
+      # what is made from them, so the tree is rebuilt when any of it moves
+      # and reused -- in minutes rather than the better part of an hour --
+      # when none of it has.
+      - name: Restore the recompiled tree
+        id: ppc_cache
+        uses: actions/cache@v4
+        with:
+          path: |
+            ppc
+            ppc_mp
+            .xex-sha256
+          key: ppc-${{ inputs.title }}-${{ steps.fetch.outputs.assets_key }}-${{ hashFiles('build.sh', 'patches/**', 'config/*.toml', 'tools/genshared.py', 'tools/gen_kernel_stubs.py') }}
+
+      - name: Cache the XenonRecomp build
+        uses: actions/cache@v4
+        with:
+          path: XenonRecomp
+          key: xenonrecomp-${{ hashFiles('build.sh', 'patches/**') }}
+
+      - name: Recompile the executables
+        if: steps.ppc_cache.outputs.cache-hit != 'true'
+        run: |
+          set -euo pipefail
+          titles=""
+          case "${{ inputs.title }}" in
+            campaign)    titles="sp" ;;
+            multiplayer) titles="mp" ;;
+            both)        titles="sp mp" ;;
+          esac
+          for title in $titles; do
+            echo "::group::recompiling $title"
+            RECOMPILE_ONLY=1 TITLE=$title ISO=mw2/game.iso ./build.sh
+            echo "::endgroup::"
+          done
+
+      - name: Note the executables' hashes and let go of the game files
+        run: |
+          set -euo pipefail
+          if [ -f mw2/default.xex ] && [ -f mw2/default_mp.xex ]; then
+            sp=$(sha256sum mw2/default.xex | cut -d' ' -f1)
+            mp=$(sha256sum mw2/default_mp.xex | cut -d' ' -f1)
+            printf '%s %s\n' "$sp" "$mp" > .xex-sha256
+          elif [ -f .xex-sha256 ]; then
+            read -r sp mp < .xex-sha256
+          else
+            echo "::error::The two executables are missing and no hashes were cached."
+            exit 1
+          fi
+          echo "MW2_XEX_SHA256_SP=$sp" >> "$GITHUB_ENV"
+          echo "MW2_XEX_SHA256_MP=$mp" >> "$GITHUB_ENV"
+          # Nothing past this point needs the game itself: the apk is built
+          # from the recompiled C++ and the two hashes. Off the runner it
+          # goes, and it cannot end up in an artifact.
+          rm -rf mw2
+          df -h / | tail -1
+
+      # ---- the apk ----------------------------------------------------------
+      - name: Restore the compiler cache
+        uses: actions/cache/restore@v4
+        id: ccache_restore
+        with:
+          path: .ccache
+          key: ccache-android-${{ inputs.title }}-${{ inputs.optimisation }}-${{ github.run_id }}
+          restore-keys: |
+            ccache-android-${{ inputs.title }}-${{ inputs.optimisation }}-
+            ccache-android-${{ inputs.title }}-
+            ccache-android-
+
+      - uses: gradle/actions/setup-gradle@v4
+        with:
+          gradle-version: "8.11.1"
+
+      - name: Build
+        working-directory: android
+        env:
+          MW2_NDK_VERSION: ${{ env.NDK_VERSION }}
+          MW2_NATIVE_OPTIMISATION: ${{ inputs.optimisation }}
+          MW2_COMPILER_LAUNCHER: ccache
+          # A key, if one was put in the secrets; otherwise the debug key
+          # signs it, which is installable and honest about what it is.
+          KEYSTORE_BASE64: ${{ secrets.KEYSTORE_BASE64 }}
+          MW2_KEYSTORE_PASSWORD: ${{ secrets.KEYSTORE_PASSWORD }}
+          MW2_KEY_ALIAS: ${{ secrets.KEY_ALIAS }}
+          MW2_KEY_PASSWORD: ${{ secrets.KEY_PASSWORD }}
+        run: |
+          set -euo pipefail
+          if [ -n "${KEYSTORE_BASE64:-}" ]; then
+            printf '%s' "$KEYSTORE_BASE64" | base64 -d > "$RUNNER_TEMP/signing.jks"
+            export MW2_KEYSTORE="$RUNNER_TEMP/signing.jks"
+            echo "signing with the key from the secrets"
+          fi
+          case "${{ inputs.build_type }}" in
+            release) build=Release ;;
+            *)       build=Debug ;;
+          esac
+          case "${{ inputs.title }}" in
+            campaign)    tasks=("assembleCampaign$build") ;;
+            multiplayer) tasks=("assembleMultiplayer$build") ;;
+            both)        tasks=("assembleCampaign$build" "assembleMultiplayer$build") ;;
+          esac
+          echo "gradle ${tasks[*]}"
+          gradle --no-daemon --stacktrace "${tasks[@]}"
+          ccache --show-stats || true
+
+      - name: Save the compiler cache
+        if: always()
+        uses: actions/cache/save@v4
+        with:
+          path: .ccache
+          key: ccache-android-${{ inputs.title }}-${{ inputs.optimisation }}-${{ github.run_id }}
+
+      - name: Collect the apks
+        id: collect
+        run: |
+          set -euo pipefail
+          mkdir -p dist
+          stamp=$(date -u +%Y%m%d)
+          short=${GITHUB_SHA::7}
+          found=0
+          while IFS= read -r apk; do
+            flavour=$(basename "$apk" | sed -E 's/^app-([a-z]+)-.*/\1/')
+            name="mw2-$flavour-android-arm64-$stamp-$short.apk"
+            cp "$apk" "dist/$name"
+            found=$((found + 1))
+          done < <(find android/app/build/outputs/apk -name "*.apk" | sort)
+          if [ "$found" = 0 ]; then
+            echo "::error::Gradle produced no apk."
+            exit 1
+          fi
+          (cd dist && sha256sum *.apk > SHA256SUMS.txt)
+          ls -la dist
+          echo "count=$found" >> "$GITHUB_OUTPUT"
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: android-apk
+          path: dist/*
+          retention-days: 14
+          if-no-files-found: error
+
+      - name: Say what came out
+        run: |
+          {
+            echo "### Android build"
+            echo
+            echo "| | |"
+            echo "|---|---|"
+            echo "| app | ${{ inputs.title }} |"
+            echo "| build | ${{ inputs.build_type }} |"
+            echo "| code | \`${{ inputs.optimisation }}\` |"
+            echo "| signed with | ${{ secrets.KEYSTORE_BASE64 != '' && 'your key' || 'the debug key' }} |"
+            echo
+            echo '```'
+            cat dist/SHA256SUMS.txt
+            echo '```'
+            echo
+            echo "Download it from the **Artifacts** section of this run."
+            echo "The apk carries no game data: it installs from your own copy,"
+            echo "the first time you start it."
+          } >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Draft a release
+        if: ${{ inputs.draft_release }}
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          tag="android-$(date -u +%Y%m%d-%H%M)"
+          gh release create "$tag" dist/* --repo "$GITHUB_REPOSITORY" --draft \
+            --title "Android ${{ inputs.title }} ($tag)" \
+            --notes "arm64 only. No game data: the app installs from your own copy of the disc. See docs/android.md."
