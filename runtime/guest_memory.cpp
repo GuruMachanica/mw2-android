@@ -20,6 +20,11 @@
 #  include <sys/mman.h>
 #  include <unistd.h>
 #  include <sys/syscall.h>
+#  include <fcntl.h>
+#  include <string>
+#  ifdef MW2_ANDROID
+#    include "android/android.h"
+#  endif
 #endif
 
 namespace
@@ -137,11 +142,34 @@ namespace
         return g_base != nullptr;
     }
 
+    // A file descriptor for the physical bank. memfd_create everywhere it is
+    // allowed; on an Android device whose seccomp policy refuses it, an
+    // unlinked file in the app's own cache does the same job -- what the two
+    // windows need is a descriptor two mappings can share, not a memfd.
+    int OpenBankDescriptor()
+    {
+        const int fd = int(syscall(SYS_memfd_create, "mw2-physical", 0));
+        if (fd >= 0) return fd;
+#ifdef MW2_ANDROID
+        const std::string path = android::Paths().cache + "/physical.bank";
+        const int file = open(path.c_str(), O_RDWR | O_CREAT | O_TRUNC, 0600);
+        if (file >= 0)
+        {
+            // Unlinked at once: the mappings keep it, and nothing is left on
+            // disk if the process dies.
+            unlink(path.c_str());
+            LOGW("memfd_create refused; the physical bank is an unlinked cache file");
+            return file;
+        }
+#endif
+        return -1;
+    }
+
     bool MapPhysicalAperture()
     {
         const size_t size = size_t(guest::kPhysicalEnd - guest::kPhysicalBase);
-        const int fd = int(syscall(SYS_memfd_create, "mw2-physical", 0));
-        if (fd < 0) { LOGE("memfd_create failed"); return false; }
+        const int fd = OpenBankDescriptor();
+        if (fd < 0) { LOGE("no descriptor for the physical bank"); return false; }
         bool ok = ftruncate(fd, off_t(size)) == 0;
         for (uint32_t window : { guest::kPhysicalBase, guest::kApertureBase })
         {

@@ -1,0 +1,114 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <!-- app_name comes from the product flavour (campaign or multiplayer). -->
+    <string name="subtitle">A recompilation, running natively</string>
+
+    <!-- launcher -->
+    <string name="play">Play</string>
+    <string name="install_game">Install the game files</string>
+    <string name="graphics_driver">Graphics driver</string>
+    <string name="settings">Settings</string>
+    <string name="view_log">Log</string>
+    <string name="close">Close</string>
+    <string name="cancel">Cancel</string>
+    <string name="reset">Reset</string>
+    <string name="done">Done</string>
+    <string name="share">Share</string>
+
+    <string name="status_ready">Ready to play.\nThe game files are in %1$s.</string>
+    <string name="status_not_installed">The game files are not installed yet.\n\nThis app contains no game data. You supply your own copy: a disc image of the game you own, or a folder with its files in it.</string>
+    <string name="status_library_missing">The runtime could not be loaded:\n%1$s</string>
+    <string name="footer">%1$s\nDriver: %2$s</string>
+
+    <!-- installing -->
+    <string name="install_hint">Point this at a disc image (.iso) of your own copy, or at a folder holding the files from one. Everything needed is copied into the app\'s own storage and checked as it goes; about 7 GB of free space is wanted.</string>
+    <string name="choose_source">Choose the disc image or folder</string>
+    <string name="begin_install">Install</string>
+    <string name="no_source">Nothing chosen yet.</string>
+    <string name="chosen">Installing from:\n%1$s</string>
+    <string name="installing">%1$s  (%2$d%%)</string>
+    <string name="install_done">The game files are installed.</string>
+    <string name="install_failed">The install did not finish:\n%1$s</string>
+    <string name="install_cancelled">Cancelled. What was copied is kept, so starting again carries on from there.</string>
+    <string name="install_running_warning">The install is still running. Leaving now stops it; it can be carried on later.</string>
+    <string name="no_space">There is not enough free space: %1$s free, about 7 GB needed.</string>
+
+    <!-- the file browser -->
+    <string name="use_this_folder">Use this folder</string>
+    <string name="allow_storage">Allow storage access</string>
+    <string name="storage_explained">Android only lets an app read files outside its own folder once you allow it. Without that, put the disc image in Android/data/%1$s/files and pick it from there.</string>
+    <string name="up_one">..  (up one)</string>
+
+    <!-- the driver screen -->
+    <string name="driver_hint">Adreno phones can run Mesa\'s Turnip driver, which is often much quicker than the one the phone shipped with, and sometimes renders things the shipped one gets wrong. Import the driver\'s zip archive as it was downloaded; it is unpacked into the app\'s own storage.</string>
+    <string name="import_driver">Import a driver (.zip)</string>
+    <string name="driver_system">The phone\'s own driver</string>
+    <string name="driver_in_use">In use: %1$s</string>
+    <string name="driver_imported">Imported %1$s.</string>
+    <string name="driver_bad_zip">That archive does not look like a driver: it has no meta.json naming the library inside it.</string>
+    <string name="driver_not_arm64">That driver is not for this phone (arm64 is needed).</string>
+    <string name="driver_remove">Remove</string>
+    <string name="driver_removed">Removed.</string>
+    <string name="driver_api">Vulkan %1$s, for Android API %2$d and later</string>
+
+    <!-- settings -->
+    <string name="section_picture">Picture</string>
+    <string name="section_sound">Sound</string>
+    <string name="section_controls">Controls</string>
+    <string name="section_files">Game files</string>
+    <string name="resolution">Render scale: %1$d%%</string>
+    <string name="resolution_hint">How many pixels are actually drawn, as a share of the screen. The display scales the result up, which costs nothing. This is the single biggest thing a weaker phone can be given; 60 to 75 percent looks close to the original console.</string>
+    <string name="msaa">Smooth edges (multisampling)</string>
+    <string name="prefer_60">Ask the screen for 60 Hz</string>
+    <string name="show_stats">Show frames per second</string>
+    <string name="hide_stats">Hide frames per second</string>
+    <string name="texture_budget_auto">Texture memory: chosen for this phone</string>
+    <string name="texture_budget">Texture memory: %1$d MB</string>
+    <string name="texture_hint">How much the texture cache may hold before it starts letting go of what has not been drawn for a while. Left alone, the runtime picks a figure from the memory this phone has.</string>
+    <string name="audio_on">Sound</string>
+    <string name="touch_controls">On-screen controls</string>
+    <string name="use_gamepad">Use a physical controller</string>
+    <string name="gamepad_hint">Turn this off to ignore controllers entirely. Some phones report an accessory, or their own sensors, as a gamepad with a stick that is not centred, which makes the character walk on its own.</string>
+    <string name="vibration">Vibration</string>
+    <string name="invert_look">Invert looking up and down</string>
+    <string name="look_x">Look sensitivity, sideways: %1$.1f</string>
+    <string name="look_y">Look sensitivity, up and down: %1$.1f</string>
+    <string name="smoothing">Look smoothing: %1$d%%</string>
+    <string name="smoothing_hint">Evens out a finger\'s jitter on glass. Too much and aiming feels like it is on ice.</string>
+    <string name="edit_controls_where">The on-screen pad is edited in the game: pause and choose “Edit controls”.</string>
+    <string name="forget_install">Forget the installed files</string>
+    <string name="forget_explained">The files stay on the phone; the app simply stops using them, and the next install can point somewhere else.</string>
+    <string name="paths_line">Installed in:\n%1$s</string>
+    <string name="paths_none">Nothing installed yet.</string>
+
+    <!-- in the game -->
+    <string name="menu">Menu</string>
+    <string name="paused">Paused</string>
+    <string name="resume">Carry on</string>
+    <string name="edit_controls">Edit controls</string>
+    <string name="edit_controls_short">Edit</string>
+    <string name="hide_touch_controls">Hide the on-screen controls</string>
+    <string name="show_touch_controls">Show the on-screen controls</string>
+    <string name="disable_gamepad">Ignore physical controllers</string>
+    <string name="enable_gamepad">Use physical controllers</string>
+    <string name="quit">Quit</string>
+    <string name="quit_explained">The game ends now. Anything the game itself has not saved is lost.</string>
+    <string name="cannot_start">The game could not start</string>
+    <string name="error_library">The runtime library would not load:\n%1$s</string>
+    <string name="error_not_installed">The game files are not installed. Install them from the launcher first.</string>
+    <string name="error_start">The runtime would not start. The log has the details.</string>
+    <string name="stats_line">%1$.0f fps   %2$d MB textures   %3$d×%4$d</string>
+
+    <!-- editing the pad -->
+    <string name="edit_pick_one">Touch a control to pick it up. Drag to move it, pinch to resize.</string>
+    <string name="edit_selected">%1$s — drag to move, pinch to resize</string>
+    <string name="edit_hint">Hidden controls are shown faintly here so they can be turned back on.</string>
+    <string name="size">Size</string>
+    <string name="opacity">Opacity</string>
+    <string name="shown">Shown</string>
+    <string name="toggle">Stays down</string>
+    <string name="snap">Snap</string>
+    <string name="reset_one">Reset this</string>
+    <string name="reset_all">Reset all</string>
+    <string name="reset_all_explained">Every control goes back where it started, at its original size.</string>
+</resources>

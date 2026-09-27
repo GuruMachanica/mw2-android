@@ -16,7 +16,9 @@
 #include <cstring>
 
 #ifndef _WIN32
-#include <execinfo.h>
+#if !defined(__ANDROID__)
+#include <execinfo.h>   // bionic has none; platform::PrintBacktrace unwinds instead
+#endif
 #include <unistd.h>
 #include <pthread.h>
 #include <deque>
@@ -38,6 +40,10 @@ namespace
 
     void DumpBacktrace(const char* why)
     {
+#if defined(__ANDROID__)
+        // The same walk, through the unwinder bionic ships (platform.cpp).
+        platform::PrintBacktrace(why);
+#else
         void* frames[64];
         int n = backtrace(frames, 64);
         std::fprintf(stderr, "\n[E] ---- %s (%d frames) ----\n", why, n);
@@ -45,6 +51,7 @@ namespace
         backtrace_symbols_fd(frames, n, 2);
         std::fprintf(stderr, "[E] --------------------------------\n");
         std::fflush(stderr);
+#endif
     }
 
     void FaultHandler(int sig, siginfo_t* info, void* uctx)

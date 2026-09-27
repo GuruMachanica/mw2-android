@@ -17,6 +17,7 @@
 #include "watchpoint.h"
 #include "install/install.h"
 #include "platform.h"
+#include "run.h"
 
 #include <unistd.h>
 
@@ -141,7 +142,7 @@ namespace
     }
 }
 
-int main(int argc, char** argv)
+int mw2::Run(int argc, char** argv)
 {
     platform::Initialise();
 
@@ -150,6 +151,7 @@ int main(int argc, char** argv)
     // catches nothing.
     // Its folder is made first: a run started with a new folder named lost its
     // whole log to the terminal.
+#ifndef MW2_ANDROID
     if (const char* logPath = env::Text("MW2_LOG_FILE"))
     {
         std::error_code ignored;
@@ -168,6 +170,7 @@ int main(int argc, char** argv)
             std::setvbuf(stderr, nullptr, _IOLBF, 0);
 #endif
     }
+#endif  // MW2_ANDROID
 
     LOGI("--- MW2 recompilation runtime (%s) ---", MW2_TITLE_NAME);
 
@@ -239,3 +242,8 @@ int main(int argc, char** argv)
     ReportAll();
     return 0;
 }
+
+// A desktop build starts here; Android starts the same run from jni.cpp.
+#ifndef MW2_ANDROID
+int main(int argc, char** argv) { return mw2::Run(argc, argv); }
+#endif

@@ -1,0 +1,127 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- The strip along the bottom while the pad is being edited. Everything on it acts on whichever control is selected; dragging and pinching happen on the control itself (TouchOverlayView). -->
+<LinearLayout xmlns:android="http://schemas.android.com/apk/res/android"
+    android:layout_width="match_parent"
+    android:layout_height="wrap_content"
+    android:orientation="vertical"
+    android:background="#E6101418"
+    android:padding="10dp">
+
+    <TextView
+        android:id="@+id/edit_title"
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:textColor="#FFFFFF"
+        android:textSize="14sp"
+        android:textStyle="bold"
+        android:text="@string/edit_pick_one" />
+
+    <LinearLayout
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:orientation="horizontal"
+        android:paddingTop="6dp">
+
+        <TextView
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:layout_gravity="center_vertical"
+            android:minWidth="56dp"
+            android:textColor="#C8D0D8"
+            android:textSize="12sp"
+            android:text="@string/size" />
+
+        <SeekBar
+            android:id="@+id/edit_size"
+            android:layout_width="0dp"
+            android:layout_height="wrap_content"
+            android:layout_weight="1" />
+
+        <TextView
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:layout_gravity="center_vertical"
+            android:minWidth="64dp"
+            android:paddingStart="8dp"
+            android:paddingEnd="0dp"
+            android:textColor="#C8D0D8"
+            android:textSize="12sp"
+            android:text="@string/opacity" />
+
+        <SeekBar
+            android:id="@+id/edit_opacity"
+            android:layout_width="0dp"
+            android:layout_height="wrap_content"
+            android:layout_weight="1" />
+    </LinearLayout>
+
+    <LinearLayout
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:orientation="horizontal"
+        android:gravity="center_vertical"
+        android:paddingTop="4dp">
+
+        <androidx.appcompat.widget.SwitchCompat
+            android:id="@+id/edit_visible"
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:textColor="#C8D0D8"
+            android:textSize="12sp"
+            android:text="@string/shown" />
+
+        <androidx.appcompat.widget.SwitchCompat
+            android:id="@+id/edit_toggle"
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:layout_marginStart="14dp"
+            android:textColor="#C8D0D8"
+            android:textSize="12sp"
+            android:text="@string/toggle" />
+
+        <androidx.appcompat.widget.SwitchCompat
+            android:id="@+id/edit_snap"
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:layout_marginStart="14dp"
+            android:textColor="#C8D0D8"
+            android:textSize="12sp"
+            android:text="@string/snap" />
+
+        <View
+            android:layout_width="0dp"
+            android:layout_height="1dp"
+            android:layout_weight="1" />
+
+        <Button
+            android:id="@+id/edit_reset_one"
+            style="?android:attr/buttonStyleSmall"
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:text="@string/reset_one" />
+
+        <Button
+            android:id="@+id/edit_reset_all"
+            style="?android:attr/buttonStyleSmall"
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:layout_marginStart="6dp"
+            android:text="@string/reset_all" />
+
+        <Button
+            android:id="@+id/edit_done"
+            style="?android:attr/buttonStyleSmall"
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:layout_marginStart="6dp"
+            android:text="@string/done" />
+    </LinearLayout>
+
+    <TextView
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:paddingTop="4dp"
+        android:textColor="#8A94A0"
+        android:textSize="11sp"
+        android:text="@string/edit_hint" />
+</LinearLayout>

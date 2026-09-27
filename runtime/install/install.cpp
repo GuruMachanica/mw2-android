@@ -5,6 +5,7 @@
 #include "../log.h"
 
 #include <atomic>
+#include <chrono>
 #include <cstdio>
 #include <cstring>
 #include <fstream>
@@ -18,6 +19,10 @@
 #endif
 #ifdef MW2_USE_SDL
 #include <SDL3/SDL.h>
+#endif
+
+#ifdef MW2_ANDROID
+#include "../android/android.h"
 #endif
 
 namespace fs = std::filesystem;
@@ -41,7 +46,10 @@ namespace
     constexpr const Title& kThisTitle = kTitles[0];
 #endif
     constexpr uint32_t kTitleId = 0x41560817;
-    constexpr const char* kGameFolder = "game";
+    // Where the game's files are kept: "game" beside the executable, unless
+    // the caller named another folder. Android puts it in the app's own
+    // storage, which is not a place a current directory can reach.
+    std::filesystem::path g_gameFolder = "game";
 
     std::string ProgramName = "mw2";
 
@@ -127,7 +135,7 @@ namespace
             if (IsGameFile(file.name)) files.push_back(&file);
         for (const Title& title : kTitles) files.push_back(source->Find(title.xex));
 
-        const fs::path folder = kGameFolder;
+        const fs::path folder = g_gameFolder;
         std::error_code ec;
         fs::create_directories(folder, ec);
         if (ec) { error = "Cannot create " + Utf8(fs::absolute(folder)) + ": " + ec.message(); return false; }
@@ -195,6 +203,10 @@ namespace
 #ifdef MW2_USE_SDL
         SDL_ShowSimpleMessageBox(SDL_MESSAGEBOX_ERROR, "Modern Warfare 2", text.c_str(), nullptr);
 #endif
+#ifdef MW2_ANDROID
+        // There is no terminal and no message box: the app shows it.
+        android::SetStatus(text.c_str());
+#endif
     }
 
     int InstallFromTerminal(const fs::path& from)
@@ -219,7 +231,7 @@ namespace
         if (!shown.empty()) std::fputs("\n", stdout);
         if (!ok) { std::fprintf(stderr, "Not installed: %s\n", error.c_str()); return 1; }
         std::printf("Installed into %s. Start mw2-sp or mw2-mp to play.\n",
-                    Utf8(fs::absolute(kGameFolder)).c_str());
+                    Utf8(fs::absolute(g_gameFolder)).c_str());
         return 0;
     }
 
@@ -230,7 +242,7 @@ namespace
         const std::string question =
             "Modern Warfare 2 needs the game's files from your Xbox 360 disc.\n\n"
             "Choose your disc image (.iso). Its files, about 5.6 GB, are copied into\n" +
-            Utf8(fs::absolute(kGameFolder)) + ".";
+            Utf8(fs::absolute(g_gameFolder)) + ".";
         const SDL_MessageBoxButtonData buttons[] = {
             { SDL_MESSAGEBOX_BUTTON_RETURNKEY_DEFAULT, 1, "Choose the disc image" },
             { SDL_MESSAGEBOX_BUTTON_ESCAPEKEY_DEFAULT, 0, "Quit" },
@@ -324,7 +336,7 @@ namespace
     // build was made from.
     bool LoadInstalled(std::vector<uint8_t>& image)
     {
-        const fs::path path = fs::path(kGameFolder) / kThisTitle.xex;
+        const fs::path path = g_gameFolder / kThisTitle.xex;
         std::vector<uint8_t> file;
         {
             std::ifstream in(path, std::ios::binary);
@@ -367,7 +379,7 @@ bool install::Prepare(int argc, char** argv, Launch& launch, int& exitCode)
         return false;
     }
 
-    const bool installed = fs::is_regular_file(fs::path(kGameFolder) / kThisTitle.xex, ec);
+    const bool installed = fs::is_regular_file(g_gameFolder / kThisTitle.xex, ec);
     if (!installed)
     {
 #ifdef MW2_USE_SDL
@@ -385,7 +397,7 @@ bool install::Prepare(int argc, char** argv, Launch& launch, int& exitCode)
     }
 
     if (!LoadInstalled(launch.image)) return false;
-    launch.gameRoot = kGameFolder;
+    launch.gameRoot = g_gameFolder;
     return true;
 }
 
@@ -402,4 +414,76 @@ bool install::LoadImageFile(const fs::path& path, std::vector<uint8_t>& image)
     }
     image = std::move(file);
     return true;
+}
+
+// ---- the app's side of installing -----------------------------------------
+// The same copy the terminal and the desktop window drive, called from an
+// Android activity instead. It runs on the caller's thread -- the app already
+// has one for it -- and reports through a callback, because there is no
+// console to print over and no window of this runtime's to draw in.
+namespace
+{
+    std::mutex g_installLock;
+    Progress* g_installing = nullptr;
+}
+
+void install::SetGameFolder(const fs::path& folder)
+{
+    g_gameFolder = folder;
+    LOGI("install: the game folder is %s", Utf8(fs::absolute(folder)).c_str());
+}
+
+const fs::path& install::GameFolder() { return g_gameFolder; }
+
+bool install::Installed()
+{
+    std::error_code ec;
+    return fs::is_regular_file(g_gameFolder / kThisTitle.xex, ec);
+}
+
+void install::CancelInstall()
+{
+    std::lock_guard lock(g_installLock);
+    if (g_installing) g_installing->cancel = true;
+}
+
+bool install::InstallFrom(const fs::path& from, std::string& error, Report report, void* user)
+{
+    Progress progress;
+    {
+        std::lock_guard lock(g_installLock);
+        if (g_installing) { error = "An install is already running."; return false; }
+        g_installing = &progress;
+    }
+
+    // The copy runs here; a thread beside it reports, four times a second,
+    // which is often enough for a progress bar and rare enough to cost
+    // nothing.
+    std::atomic<bool> finished{ false };
+    std::thread reporter;
+    if (report)
+        reporter = std::thread([&] {
+            while (!finished.load(std::memory_order_acquire))
+            {
+                {
+                    std::lock_guard lock(progress.lock);
+                    report(progress.file.c_str(), progress.done, progress.total, user);
+                }
+                std::this_thread::sleep_for(std::chrono::milliseconds(250));
+            }
+            std::lock_guard lock(progress.lock);
+            report(progress.file.c_str(), progress.done, progress.total, user);
+        });
+
+    const bool ok = Install(from, progress, error);
+    finished.store(true, std::memory_order_release);
+    if (reporter.joinable()) reporter.join();
+    {
+        std::lock_guard lock(g_installLock);
+        g_installing = nullptr;
+    }
+    if (!ok && error.empty()) error = "The game could not be installed.";
+    if (ok) LOGI("install: done, into %s", Utf8(fs::absolute(g_gameFolder)).c_str());
+    else    LOGE("install: %s", error.c_str());
+    return ok;
 }

@@ -45,3 +45,16 @@ ppc_mp/
 build-mp/
 build-mp-release/
 config/mw2mp_switch_tables.toml
+
+# ---- the Android app's build output ----
+android/build/
+android/.gradle/
+android/app/build/
+android/local.properties
+android/gradle/wrapper/gradle-wrapper.jar
+*.apk
+*.aab
+*.keystore
+
+# ---- fetched by android/fetch_deps.sh, somebody else's code ----
+third_party/libadrenotools/

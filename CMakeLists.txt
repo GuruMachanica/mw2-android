@@ -7,6 +7,12 @@ if(NOT CMAKE_BUILD_TYPE)
     set(CMAKE_BUILD_TYPE Release)
 endif()
 
+# Android brings its own window, input and audio (runtime/android/), so SDL is
+# off there whatever the cache says -- and a default the Gradle build does not
+# have to repeat.
+if(ANDROID)
+    set(MW2_USE_SDL OFF CACHE BOOL "Use SDL3 (not on Android)" FORCE)
+endif()
 option(MW2_USE_SDL "Use SDL3 for gamepad input (and later window/audio)" ON)
 option(MW2_TRACE_INDIRECT "Report indirect calls with no recompiled target instead of jumping to null" ON)
 option(MW2_LOGGING "Emit the runtime's log" ON)
@@ -64,6 +70,13 @@ file(GLOB RUNTIME_SOURCES CONFIGURE_DEPENDS
      "${CMAKE_SOURCE_DIR}/runtime/install/*.cpp"
      "${CMAKE_SOURCE_DIR}/runtime/gpu/vulkan/*.cpp")
 
+if(ANDROID)
+    # The window, the touch pad, the AAudio sink, the driver loader and the
+    # JNI surface the app talks to (docs/android.md).
+    file(GLOB ANDROID_SOURCES CONFIGURE_DEPENDS "${CMAKE_SOURCE_DIR}/runtime/android/*.cpp")
+    list(APPEND RUNTIME_SOURCES ${ANDROID_SOURCES})
+endif()
+
 # The glue build.sh generates from the recompiled output -- a stub for every
 # kernel import the runtime lacks, a tracing hook for every D3D9 entry point --
 # lives beside that output, since it is different for each title.
@@ -78,10 +91,21 @@ if(NOT EXISTS "${MW2_ONLINE_SOURCE}" OR MW2_ONLINE STREQUAL "service")
 endif()
 message(STATUS "Online service: ${MW2_ONLINE}")
 
-add_executable(mw2 ${RUNTIME_SOURCES}
-    "${CMAKE_SOURCE_DIR}/runtime/online/service.cpp"
-    "${MW2_ONLINE_SOURCE}"
-    "${MW2_PPC_DIR}/stubs_generated.cpp")
+# On Android there is no process of ours to be the executable: the app's
+# activity is the process, and this is what it loads (libmw2.so, System
+# .loadLibrary("mw2"), runtime/android/jni.cpp). Everywhere else it is the
+# program itself.
+if(ANDROID)
+    add_library(mw2 SHARED ${RUNTIME_SOURCES}
+        "${CMAKE_SOURCE_DIR}/runtime/online/service.cpp"
+        "${MW2_ONLINE_SOURCE}"
+        "${MW2_PPC_DIR}/stubs_generated.cpp")
+else()
+    add_executable(mw2 ${RUNTIME_SOURCES}
+        "${CMAKE_SOURCE_DIR}/runtime/online/service.cpp"
+        "${MW2_ONLINE_SOURCE}"
+        "${MW2_PPC_DIR}/stubs_generated.cpp")
+endif()
 target_link_libraries(mw2 PRIVATE ppc_recomp)
 if(MW2_DIAGNOSTICS)
     target_compile_definitions(mw2 PRIVATE MW2_DIAGNOSTICS=1)
@@ -115,6 +139,8 @@ if(WIN32)
     if(NOT MW2_DIAGNOSTICS)
         target_link_options(mw2 PRIVATE -mwindows)
     endif()
+elseif(ANDROID)
+    include(cmake/android.cmake)
 else()
     # -rdynamic so backtrace_symbols can resolve the sub_XXXXXXXX guest functions.
     set_target_properties(mw2 PROPERTIES ENABLE_EXPORTS ON)
@@ -148,23 +174,33 @@ target_link_libraries(mw2 PRIVATE ffmpeg_xma)
 if(WIN32)
     include(cmake/vulkan-windows.cmake)
     add_dependencies(mw2 vulkan_import_library)
+elseif(ANDROID)
+    # The NDK's sysroot carries the headers and a libvulkan.so, but this build
+    # links neither: which Vulkan the process talks to is decided while it
+    # runs -- the system's, or a driver the player imported
+    # (runtime/gpu/vulkan/loader.cpp, runtime/android/driver.cpp). Setting
+    # this here keeps the Vulkan block below as it is.
+    set(Vulkan_FOUND TRUE)
+    set(Vulkan_LIBRARY "loaded at run time")
 else()
     find_package(Vulkan)
 endif()
 if(Vulkan_FOUND)
-    target_link_libraries(mw2 PRIVATE Vulkan::Vulkan)
+    if(NOT ANDROID)
+        target_link_libraries(mw2 PRIVATE Vulkan::Vulkan)
+    endif()
     target_compile_definitions(mw2 PRIVATE MW2_HAVE_VULKAN=1)
     message(STATUS "Vulkan found: ${Vulkan_LIBRARY}")
 else()
     message(STATUS "Vulkan not found -- building without a window")
 endif()
 
-if(NOT WIN32)
+if(NOT WIN32 AND NOT ANDROID)
     target_link_libraries(mw2 PRIVATE pthread)
 endif()
 
 # The two tools below are for working on the renderer, on Linux.
-if(NOT WIN32)
+if(NOT WIN32 AND NOT ANDROID)
 # ---- offline shader translation -------------------------------------------
 # The translator has to live in the runtime, because the title hands the GPU
 # microcode while it runs. Building it as a tool too gives a fast loop against

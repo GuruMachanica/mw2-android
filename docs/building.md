@@ -8,6 +8,10 @@ GPU (through Vulkan) and audio hardware ([runtime.md](runtime.md)).
 The game data, the generated C++ and the XenonRecomp checkout are gitignored.
 Everything under version control is hand-written or a patch.
 
+For a phone, see [android.md](android.md): the steps below are done first on
+a desktop (the recompiler runs there), and Gradle then builds the same
+`CMakeLists.txt` for arm64.
+
 ## Requirements
 
 - `cmake`, `ninja-build`, `clang-18`, `lld-18`, `python3`, `git`.

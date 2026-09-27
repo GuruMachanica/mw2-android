@@ -1,6 +1,7 @@
 #include "platform.h"
 
 #include <cstdio>
+#include <cstring>
 
 #ifdef _WIN32
 #define WIN32_LEAN_AND_MEAN
@@ -8,8 +9,13 @@
 #include <timeapi.h>
 #include <string>
 #else
+#include <climits>
 #include <dlfcn.h>
+// bionic has no execinfo.h: Android's unwinder is reached another way, and
+// the backtrace below is written by hand there.
+#if !defined(__ANDROID__)
 #include <execinfo.h>
+#endif
 #include <pthread.h>
 #include <sched.h>
 #include <sys/resource.h>
@@ -86,6 +92,30 @@ void platform::PrintBacktrace(const char* why)
     std::fflush(stderr);
 }
 
+namespace
+{
+    struct ThreadStart { void (*body)(void*); void* argument; const char* name; };
+
+    DWORD WINAPI RunThread(LPVOID raw)
+    {
+        ThreadStart start = *static_cast<ThreadStart*>(raw);
+        delete static_cast<ThreadStart*>(raw);
+        if (start.name) platform::SetThreadName(start.name);
+        start.body(start.argument);
+        return 0;
+    }
+}
+
+bool platform::StartThread(void (*body)(void*), void* argument, size_t stackBytes,
+                           const char* name)
+{
+    auto* start = new ThreadStart{ body, argument, name };
+    const HANDLE thread = CreateThread(nullptr, stackBytes, &RunThread, start, 0, nullptr);
+    if (!thread) { delete start; return false; }
+    CloseHandle(thread);   // detached: nothing joins these
+    return true;
+}
+
 void* platform::OpenLibrary(const char* path)
 {
     const int n = MultiByteToWideChar(CP_UTF8, 0, path, -1, nullptr, 0);
@@ -123,6 +153,57 @@ void platform::IdleThreadPriority()
     if (pthread_setschedparam(pthread_self(), SCHED_IDLE, &none) != 0) LowerThreadPriority();
 }
 
+#if defined(__ANDROID__)
+// _Unwind_Backtrace is in libgcc/libunwind and is what bionic itself uses.
+// dladdr turns an address into a library and a symbol where there is one,
+// which is enough to tell "crashed in the driver" from "crashed in the
+// recompiled code" -- the two that matter here.
+#include <unwind.h>
+
+namespace
+{
+    struct Frames { void** at; int taken; int room; };
+
+    _Unwind_Reason_Code TakeFrame(_Unwind_Context* context, void* argument)
+    {
+        auto* frames = static_cast<Frames*>(argument);
+        const uintptr_t pc = _Unwind_GetIP(context);
+        if (!pc) return _URC_NO_REASON;
+        if (frames->taken >= frames->room) return _URC_END_OF_STACK;
+        frames->at[frames->taken++] = reinterpret_cast<void*>(pc);
+        return _URC_NO_REASON;
+    }
+}
+
+void platform::PrintBacktrace(const char* why)
+{
+    void* addresses[64];
+    Frames frames{ addresses, 0, 64 };
+    _Unwind_Backtrace(&TakeFrame, &frames);
+    std::fprintf(stderr, "\n[E] ---- %s (%d frames) ----\n", why, frames.taken);
+    for (int i = 0; i < frames.taken; i++)
+    {
+        Dl_info info{};
+        if (dladdr(addresses[i], &info) && info.dli_fname)
+        {
+            const char* file = std::strrchr(info.dli_fname, '/');
+            file = file ? file + 1 : info.dli_fname;
+            const uintptr_t offset = uintptr_t(addresses[i]) - uintptr_t(info.dli_fbase);
+            if (info.dli_sname)
+                std::fprintf(stderr, "[E]  #%02d %s+0x%zx (%s)\n", i, info.dli_sname,
+                             size_t(uintptr_t(addresses[i]) - uintptr_t(info.dli_saddr)), file);
+            else
+                std::fprintf(stderr, "[E]  #%02d %s+0x%zx\n", i, file, size_t(offset));
+        }
+        else
+        {
+            std::fprintf(stderr, "[E]  #%02d %p\n", i, addresses[i]);
+        }
+    }
+    std::fprintf(stderr, "[E] --------------------------------\n");
+    std::fflush(stderr);
+}
+#else
 void platform::PrintBacktrace(const char* why)
 {
     void* frames[64];
@@ -132,6 +213,58 @@ void platform::PrintBacktrace(const char* why)
     backtrace_symbols_fd(frames, n, 2);
     std::fprintf(stderr, "[E] --------------------------------\n");
     std::fflush(stderr);
+}
+#endif
+
+namespace
+{
+    struct ThreadStart { void (*body)(void*); void* argument; const char* name; };
+
+    void* RunThread(void* raw)
+    {
+        ThreadStart start = *static_cast<ThreadStart*>(raw);
+        delete static_cast<ThreadStart*>(raw);
+        if (start.name) platform::SetThreadName(start.name);
+        start.body(start.argument);
+        return nullptr;
+    }
+}
+
+bool platform::StartThread(void (*body)(void*), void* argument, size_t stackBytes,
+                           const char* name)
+{
+    pthread_attr_t attributes;
+    if (pthread_attr_init(&attributes) != 0) return false;
+    pthread_attr_setdetachstate(&attributes, PTHREAD_CREATE_DETACHED);
+    if (stackBytes)
+    {
+        // Rounded up to a page, and never below what the platform insists on.
+        const size_t page = size_t(sysconf(_SC_PAGESIZE));
+        size_t wanted = (stackBytes + page - 1) & ~(page - 1);
+#ifdef PTHREAD_STACK_MIN
+        if (wanted < size_t(PTHREAD_STACK_MIN)) wanted = size_t(PTHREAD_STACK_MIN);
+#endif
+        pthread_attr_setstacksize(&attributes, wanted);
+    }
+    auto* start = new ThreadStart{ body, argument, name };
+    pthread_t thread{};
+    const int made = pthread_create(&thread, &attributes, &RunThread, start);
+    pthread_attr_destroy(&attributes);
+    if (made != 0)
+    {
+        delete start;
+        // A smaller stack is worth trying before giving up: a device short of
+        // address space would rather have the thread than the headroom.
+        pthread_t fallback{};
+        auto* retry = new ThreadStart{ body, argument, name };
+        if (pthread_create(&fallback, nullptr, &RunThread, retry) != 0)
+        {
+            delete retry;
+            return false;
+        }
+        pthread_detach(fallback);
+    }
+    return true;
 }
 
 void* platform::OpenLibrary(const char* path) { return dlopen(path, RTLD_NOW | RTLD_LOCAL); }

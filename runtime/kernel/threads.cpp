@@ -6,6 +6,7 @@
 #include "../guest.h"
 #include "../log.h"
 #include "../crash.h"
+#include "../platform.h"
 
 #include <atomic>
 #include <cstdlib>
@@ -13,12 +14,20 @@
 #include <thread>
 #include <algorithm>
 #include <cstdio>
+#include <memory>
 
 using namespace kernel;
 
 namespace
 {
     constexpr uint32_t kDefaultStackSize = 512u * 1024u;
+
+    // The host stack a guest thread runs on. It carries the recompiled
+    // functions' frames, which are the guest's, and the guest's are large --
+    // this is not the guest stack (kDefaultStackSize, allocated in guest
+    // memory), it is the host's own. 8 MB matches what a Linux desktop build
+    // gets for free and is what an Android one has to ask for.
+    constexpr size_t kHostStackSize = 8u * 1024u * 1024u;
 
     // The main thread is id 1 (main.cpp); the first thread the title creates is
     // XAudio2's mixer, and game code that runs from its voice callbacks must
@@ -42,9 +51,28 @@ namespace
         bool Signalled(uintptr_t) const override { return exited; }
 
         // The host thread holds the object for as long as it runs.
+        //
+        // Not std::thread: the recompiled code puts the guest's frames on the
+        // host stack, and the host's default is not always enough for them.
+        // 8 MB is what glibc gives a thread anyway, so only bionic notices
+        // the difference (platform::StartThread).
         static void Launch(const std::shared_ptr<GuestThread>& thread)
         {
-            std::thread([thread] { thread->Body(); }).detach();
+            // The host thread owns this reference and drops it on the way out.
+            auto* held = new std::shared_ptr<GuestThread>(thread);
+            const bool started = platform::StartThread(
+                [](void* raw)
+                {
+                    std::unique_ptr<std::shared_ptr<GuestThread>> owner(
+                        static_cast<std::shared_ptr<GuestThread>*>(raw));
+                    (*owner)->Body();
+                },
+                held, kHostStackSize, "guest thread");
+            if (!started)
+            {
+                delete held;
+                LOGE("kernel: a guest thread could not be started");
+            }
         }
 
         void Exit()

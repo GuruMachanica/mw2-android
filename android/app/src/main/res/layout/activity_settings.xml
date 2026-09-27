@@ -1,0 +1,196 @@
+<?xml version="1.0" encoding="utf-8"?>
+<ScrollView xmlns:android="http://schemas.android.com/apk/res/android"
+    android:layout_width="match_parent"
+    android:layout_height="match_parent"
+    android:background="#0B0E12">
+
+    <LinearLayout
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:orientation="vertical"
+        android:padding="20dp">
+
+        <!-- picture -->
+        <TextView
+            style="@style/SectionHeading"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:text="@string/section_picture" />
+
+        <TextView
+            android:id="@+id/resolution_label"
+            style="@style/SettingLabel"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content" />
+
+        <SeekBar
+            android:id="@+id/resolution"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content" />
+
+        <TextView
+            style="@style/SettingHint"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:text="@string/resolution_hint" />
+
+        <androidx.appcompat.widget.SwitchCompat
+            android:id="@+id/msaa"
+            style="@style/SettingSwitch"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:text="@string/msaa" />
+
+        <androidx.appcompat.widget.SwitchCompat
+            android:id="@+id/prefer60"
+            style="@style/SettingSwitch"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:text="@string/prefer_60" />
+
+        <androidx.appcompat.widget.SwitchCompat
+            android:id="@+id/stats"
+            style="@style/SettingSwitch"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:text="@string/show_stats" />
+
+        <TextView
+            android:id="@+id/texture_label"
+            style="@style/SettingLabel"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content" />
+
+        <SeekBar
+            android:id="@+id/texture_budget"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content" />
+
+        <TextView
+            style="@style/SettingHint"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:text="@string/texture_hint" />
+
+        <!-- sound -->
+        <TextView
+            style="@style/SectionHeading"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:text="@string/section_sound" />
+
+        <androidx.appcompat.widget.SwitchCompat
+            android:id="@+id/audio"
+            style="@style/SettingSwitch"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:text="@string/audio_on" />
+
+        <!-- controls -->
+        <TextView
+            style="@style/SectionHeading"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:text="@string/section_controls" />
+
+        <androidx.appcompat.widget.SwitchCompat
+            android:id="@+id/touch"
+            style="@style/SettingSwitch"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:text="@string/touch_controls" />
+
+        <androidx.appcompat.widget.SwitchCompat
+            android:id="@+id/gamepad"
+            style="@style/SettingSwitch"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:text="@string/use_gamepad" />
+
+        <TextView
+            style="@style/SettingHint"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:text="@string/gamepad_hint" />
+
+        <androidx.appcompat.widget.SwitchCompat
+            android:id="@+id/vibration"
+            style="@style/SettingSwitch"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:text="@string/vibration" />
+
+        <androidx.appcompat.widget.SwitchCompat
+            android:id="@+id/invert"
+            style="@style/SettingSwitch"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:text="@string/invert_look" />
+
+        <TextView
+            android:id="@+id/look_x_label"
+            style="@style/SettingLabel"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content" />
+
+        <SeekBar
+            android:id="@+id/look_x"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content" />
+
+        <TextView
+            android:id="@+id/look_y_label"
+            style="@style/SettingLabel"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content" />
+
+        <SeekBar
+            android:id="@+id/look_y"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content" />
+
+        <TextView
+            android:id="@+id/smoothing_label"
+            style="@style/SettingLabel"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content" />
+
+        <SeekBar
+            android:id="@+id/smoothing"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content" />
+
+        <TextView
+            style="@style/SettingHint"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:text="@string/smoothing_hint" />
+
+        <TextView
+            style="@style/SettingHint"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="10dp"
+            android:text="@string/edit_controls_where" />
+
+        <!-- the game files -->
+        <TextView
+            style="@style/SectionHeading"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:text="@string/section_files" />
+
+        <TextView
+            android:id="@+id/paths"
+            style="@style/SettingHint"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content" />
+
+        <Button
+            android:id="@+id/forget"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="10dp"
+            android:text="@string/forget_install" />
+    </LinearLayout>
+</ScrollView>

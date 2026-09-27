@@ -1,0 +1,14 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- A plain mark: two chevrons, drawn as vectors so there is no artwork to ship and nothing that belongs to anyone else. -->
+<vector xmlns:android="http://schemas.android.com/apk/res/android"
+    android:width="108dp"
+    android:height="108dp"
+    android:viewportWidth="108"
+    android:viewportHeight="108">
+    <path
+        android:fillColor="#7FB2FF"
+        android:pathData="M30,34 L46,54 L30,74 L40,74 L56,54 L40,34 Z" />
+    <path
+        android:fillColor="#4E7FC4"
+        android:pathData="M52,34 L68,54 L52,74 L62,74 L78,54 L62,34 Z" />
+</vector>

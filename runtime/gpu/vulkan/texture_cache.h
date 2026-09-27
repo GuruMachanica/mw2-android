@@ -118,5 +118,14 @@ namespace vk::textures
     bool BoundInThisSegment(uint32_t physical, uint32_t size);
     void TakeLateRestages(std::vector<uint64_t>& ids);
 
+    // What the cache holds and what it is allowed to hold. A phone tells its
+    // applications when memory is short (onTrimMemory), and the answer to
+    // that is a smaller budget: the next frame evicts down to it, and what
+    // was evicted is uploaded again the next time it is drawn. Raising the
+    // budget again costs nothing.
+    uint64_t LiveBytes();
+    uint64_t Budget();
+    void SetBudget(uint64_t bytes);
+
     void Report();
 }

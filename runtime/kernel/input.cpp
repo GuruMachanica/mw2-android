@@ -11,6 +11,12 @@
 #include "../stutters.h"
 #include "../gpu/vulkan/renderer.h"
 
+#ifdef MW2_ANDROID
+#include "../android/android.h"
+#include <algorithm>
+#include <cstring>
+#endif
+
 #ifdef MW2_USE_SDL
 #include <SDL3/SDL.h>
 #include <atomic>
@@ -247,11 +253,12 @@ namespace
         return false;
     }
 
+#endif  // MW2_USE_SDL
+
     // The packet number tells the title whether anything has changed since it
     // last looked. Incrementing it every poll says "changed" sixty times a second.
     struct Latch { uint32_t packet = 0; uint16_t buttons = 0; uint8_t triggers[2]{}; int16_t axes[4]{}; };
     Latch g_latch[4];
-#endif
 }
 
 PPC_FUNC(__imp__XamInputGetState)
@@ -265,6 +272,63 @@ PPC_FUNC(__imp__XamInputGetState)
     uint32_t sAddr = ctx.r5.u32;
     auto* out = GuestPtr<XInputState>(sAddr);
     if (!out) { ctx.r3.u64 = X_ERROR_DEVICE_NOT_CONNECTED; return; }
+
+#ifdef MW2_ANDROID
+    // The touch controls and any physical pad, merged by the Android layer.
+    // User 0 always answers: the on-screen pad stands in for a controller,
+    // and a title told there is none on user 0 stops on its "please
+    // reconnect the controller" screen and waits there.
+    {
+        android::input::Pad pad;
+        if (!android::input::Poll(user, pad))
+        {
+            *out = XInputState{};
+            ctx.r3.u64 = X_ERROR_DEVICE_NOT_CONNECTED;
+            return;
+        }
+        int16_t axes[4] = { pad.leftX, pad.leftY, pad.rightX, pad.rightY };
+        uint8_t triggers[2] = { pad.leftTrigger, pad.rightTrigger };
+        if (user == 0)
+        {
+            // The same hand-off the desktop build makes: what the player did
+            // is seen first, then the autopilot may add to it.
+            player::SawPad(pad.buttons, triggers[1]);
+            player::Press press = player::Press::None;
+            if (player::Steer(axes, press))
+                switch (press)
+                {
+                case player::Press::A:    pad.buttons |= 0x1000; break;
+                case player::Press::Up:   pad.buttons |= 0x0001; break;
+                case player::Press::Left: pad.buttons |= 0x0004; break;
+                case player::Press::Fire: triggers[1] = 255; break;
+                case player::Press::None: break;
+                }
+        }
+
+        Latch& latch = g_latch[user & 3];
+        const bool changed = latch.buttons != pad.buttons ||
+                             std::memcmp(latch.triggers, triggers, sizeof triggers) != 0 ||
+                             std::memcmp(latch.axes, axes, sizeof axes) != 0;
+        if (changed)
+        {
+            latch.packet++;
+            latch.buttons = pad.buttons;
+            std::memcpy(latch.triggers, triggers, sizeof triggers);
+            std::memcpy(latch.axes, axes, sizeof axes);
+        }
+
+        out->packet               = latch.packet;
+        out->gamepad.buttons      = pad.buttons;
+        out->gamepad.leftTrigger  = triggers[0];
+        out->gamepad.rightTrigger = triggers[1];
+        out->gamepad.thumbLX      = uint16_t(axes[0]);
+        out->gamepad.thumbLY      = uint16_t(axes[1]);
+        out->gamepad.thumbRX      = uint16_t(axes[2]);
+        out->gamepad.thumbRY      = uint16_t(axes[3]);
+        ctx.r3.u64 = X_ERROR_SUCCESS;
+        return;
+    }
+#endif
 
 #ifdef MW2_USE_SDL
     SDL_Gamepad* pad = PadFor(user);
@@ -374,6 +438,24 @@ PPC_FUNC(__imp__XamInputGetCapabilities)
     uint32_t user = ctx.r3.u32;
     auto* caps = GuestPtr<XInputCapabilities>(ctx.r5.u32);
     if (!caps) { ctx.r3.u64 = X_ERROR_DEVICE_NOT_CONNECTED; return; }
+#ifdef MW2_ANDROID
+    if (android::input::Connected(user))
+    {
+        *caps = XInputCapabilities{};
+        caps->type = 1;      // XINPUT_DEVTYPE_GAMEPAD
+        caps->subType = 1;   // XINPUT_DEVSUBTYPE_GAMEPAD
+        caps->gamepad.buttons = 0xF3FF;
+        caps->gamepad.leftTrigger = caps->gamepad.rightTrigger = 0xFF;
+        caps->gamepad.thumbLX = caps->gamepad.thumbLY = uint16_t(0xFFFF);
+        caps->gamepad.thumbRX = caps->gamepad.thumbRY = uint16_t(0xFFFF);
+        caps->vibration.left = caps->vibration.right = uint16_t(0xFFFF);
+        ctx.r3.u64 = X_ERROR_SUCCESS;
+        return;
+    }
+    *caps = XInputCapabilities{};
+    ctx.r3.u64 = X_ERROR_DEVICE_NOT_CONNECTED;
+    return;
+#endif
 #ifdef MW2_USE_SDL
     if (PadFor(user))
     {
@@ -407,6 +489,13 @@ PPC_FUNC(__imp__XamInputSetState)
     if (user >= 4) { ctx.r3.u64 = X_ERROR_DEVICE_NOT_CONNECTED; return; }
     auto* v = GuestPtr<XInputVibration>(ctx.r5.u32);
     if (!v) { ctx.r3.u64 = X_ERROR_BAD_ARGUMENTS; return; }
+#ifdef MW2_ANDROID
+    // The phone's vibrator, or a pad that has motors of its own: the app
+    // decides which, and whether the player wanted either.
+    android::input::Rumble(user, v->left, v->right);
+    ctx.r3.u64 = X_ERROR_SUCCESS;
+    return;
+#endif
 #ifdef MW2_USE_SDL
     if (SDL_Gamepad* pad = PadFor(user))
     {

@@ -6,7 +6,7 @@
 #include "diagnostics.h"
 #include "crash.h"
 
-#if MW2_DIAGNOSTICS && !defined(_WIN32)
+#if MW2_DIAGNOSTICS && !defined(_WIN32) && defined(__x86_64__)
 #include <sys/mman.h>
 #include <execinfo.h>
 #include <unistd.h>

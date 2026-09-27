@@ -13,10 +13,15 @@
 #include "../guest.h"
 #include "../log.h"
 #include "../crash.h"
+#include "../platform.h"
 #include "../kernel/kernel.h"
 
 #ifdef MW2_USE_SDL
 #include <SDL3/SDL.h>
+#endif
+
+#ifdef MW2_ANDROID
+#include "../android/android.h"
 #endif
 
 #include <algorithm>
@@ -61,7 +66,6 @@ namespace
     std::mutex g_lock;
     std::condition_variable g_wake;
     Client g_clients[kMaxClients];
-    std::thread g_worker;
     bool g_workerStarted = false;
 
     diag::Stat g_callbacks, g_frames, g_dropped, g_earlyPumps;   // the audio thread's
@@ -81,7 +85,19 @@ namespace
 
     void OpenOutput()
     {
-#ifdef MW2_USE_SDL
+#ifdef MW2_ANDROID
+        if (OutputDisabled()) { LOGI("audio: output disabled (MW2_NO_AUDIO)"); return; }
+        // AAudio, in its low-latency mode where the device has one. The sink
+        // does the 5.1-to-stereo fold and any rate conversion the device
+        // needs (runtime/android/audio.cpp).
+        if (!android::audio::Open())
+        {
+            LOGW("audio: no AAudio stream; frames are discarded");
+            return;
+        }
+        g_outputOpen = true;
+        LOGI("audio: AAudio open; feeding 5.1 float at 48 kHz");
+#elif defined(MW2_USE_SDL)
         if (OutputDisabled()) { LOGI("audio: output disabled (MW2_NO_AUDIO)"); return; }
         if (!SDL_InitSubSystem(SDL_INIT_AUDIO))
         {
@@ -114,7 +130,9 @@ namespace
     // Frames of 5.333 ms the host still holds, or 0 without a device.
     uint32_t QueuedFrames()
     {
-#ifdef MW2_USE_SDL
+#ifdef MW2_ANDROID
+        return android::audio::QueuedFrames();
+#elif defined(MW2_USE_SDL)
         std::lock_guard<std::mutex> guard(g_streamLock);
         if (!g_stream) return 0;
         int bytes = SDL_GetAudioStreamQueued(g_stream);
@@ -208,8 +226,14 @@ namespace
     {
         if (g_workerStarted) return;
         g_workerStarted = true;
-        g_worker = std::thread(WorkerMain);
-        g_worker.detach();
+        // The mixer callback is guest code and runs on this thread, so the
+        // thread needs a host stack the guest's frames fit in (platform.h).
+        if (!platform::StartThread([](void*) { WorkerMain(); }, nullptr,
+                                   8u * 1024u * 1024u, "audio mixer"))
+        {
+            LOGE("audio: the mixer thread could not be started");
+            g_workerStarted = false;
+        }
     }
 }
 
@@ -251,6 +275,25 @@ void apu::audio::SubmitFrame(uint32_t handle, uint32_t samplesGuestAddress)
     const uint32_t i = handle & 0xFFFF;
     if ((handle & 0xFFFF0000u) != kHandleTag || i >= kMaxClients || !samplesGuestAddress) return;
     g_frames++;
+#ifdef MW2_ANDROID
+    if (!g_outputOpen) return;
+    if (android::audio::QueuedFrames() > kHighWaterFrames) { g_dropped++; return; }
+    {
+        // Six planes of 256 big-endian floats to interleaved host floats,
+        // the same conversion the SDL path makes; the sink folds them down.
+        const uint32_t* in = reinterpret_cast<const uint32_t*>(guest::Base() + samplesGuestAddress);
+        alignas(16) float out[kFrameFloats];
+        for (uint32_t s = 0; s < kSamplesPerChannel; s++)
+            for (uint32_t c = 0; c < kChannels; c++)
+            {
+                uint32_t bits; std::memcpy(&bits, &in[c * kSamplesPerChannel + s], 4);
+                bits = __builtin_bswap32(bits);
+                std::memcpy(&out[s * kChannels + c], &bits, 4);
+            }
+        android::audio::Write(out, kSamplesPerChannel);
+    }
+    return;
+#endif
 #ifdef MW2_USE_SDL
     std::lock_guard<std::mutex> guard(g_streamLock);
     if (!g_stream) return;

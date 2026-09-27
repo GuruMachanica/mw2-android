@@ -48,6 +48,9 @@ uint32_t vk::textures::Version(uint64_t) { return 0; }
 bool vk::textures::BoundInThisSegment(uint32_t, uint32_t) { return false; }
 void vk::textures::TakeLateRestages(std::vector<uint64_t>& ids) { ids.clear(); }
 uint64_t vk::textures::FrameNumber() { return 0; }
+uint64_t vk::textures::LiveBytes() { return 0; }
+uint64_t vk::textures::Budget() { return 0; }
+void vk::textures::SetBudget(uint64_t) {}
 void vk::textures::MemoryWritten(uint32_t, uint32_t) {}
 void vk::textures::BeginUploads(uint32_t) {}
 #else
@@ -1119,6 +1122,19 @@ namespace
 }
 
 uint64_t vk::textures::FrameNumber() { return g.frame; }
+
+uint64_t vk::textures::LiveBytes() { return g.liveBytes; }
+uint64_t vk::textures::Budget() { return g.budget; }
+
+// A budget the system asked for. The eviction pass is left to the next frame
+// -- it waits for the device, and the caller is whichever thread Android
+// chose to warn us on.
+void vk::textures::SetBudget(uint64_t bytes)
+{
+    const uint64_t floor = 48ull << 20;   // below this nothing would stay cached
+    g.budget = std::max(bytes, floor);
+    g.nextEviction = 0;
+}
 
 void vk::textures::MemoryWritten(uint32_t physicalAddress, uint32_t size)
 {

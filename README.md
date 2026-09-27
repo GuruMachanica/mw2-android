@@ -24,10 +24,12 @@ Activision's servers), cutscene and loading movies. Special Ops is untested.
 
 - An ISO of the Xbox 360 disc, version 1.0.557 (as on the main menu; title
   updates can't be used). The installer checks it.
-- Linux or Windows, 64-bit
-- A Vulkan 1.2 GPU
+- Linux or Windows, 64-bit; or Android 8.0 and later on a 64-bit phone
+  ([docs/android.md](docs/android.md))
+- A Vulkan 1.2 GPU (1.1 on Android)
 - 6 GB of disk space
-- A controller (the keyboard only covers the menus)
+- A controller (the keyboard only covers the menus; Android has an
+  on-screen pad you can rearrange)
 
 ## Install
 
@@ -40,6 +42,17 @@ From a terminal: `./mw2-mp --install path/to/game.iso` (an extracted disc
 folder works too).
 
 Saves go in `saves/` beside the executables.
+
+## Android
+
+`android/` is a full port: the same runtime, a Vulkan surface from the
+activity, AAudio, and an on-screen pad every part of which can be moved,
+resized, hidden or made to stay down when tapped. Physical controllers work
+and can be switched off entirely. An imported Turnip driver can be used in
+place of the phone's own.
+
+Building it means building the desktop project first (the recompiler runs
+there) and then Gradle: see [docs/android.md](docs/android.md).
 
 ## Play
 
@@ -69,7 +82,8 @@ Saves go in `saves/` beside the executables.
 
 Building, the source layout and how the runtime works:
 [docs/building.md](docs/building.md), [docs/runtime.md](docs/runtime.md),
-[docs/switches.md](docs/switches.md), and the rest of [docs/](docs/).
+[docs/switches.md](docs/switches.md), [docs/android.md](docs/android.md),
+and the rest of [docs/](docs/).
 
 ## License
 

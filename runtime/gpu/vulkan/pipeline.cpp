@@ -45,6 +45,13 @@ void vk::pipeline::OnDeviceLost(void (*)(const char*)) {}
 #include <vector>
 
 #include <vulkan/vulkan.h>
+#include "loader.h"
+
+#if defined(MW2_VULKAN_DYNAMIC)
+namespace { bool OpenVulkan() { std::string error; return vk::loader::Open(error); } }
+#else
+namespace { bool OpenVulkan() { return true; } }
+#endif
 
 namespace
 {
@@ -252,6 +259,11 @@ bool vk::pipeline::CreateDevice(void* physicalDevice, uint32_t family,
     VkDevice device = VK_NULL_HANDLE;
     const VkResult r = vkCreateDevice(physical, &info, nullptr, &device);
     if (r != VK_SUCCESS) { LOGW("vulkan: no device (%s)", Explain(r)); return false; }
+#if defined(MW2_VULKAN_DYNAMIC)
+    // From here on the device's entry points come from the driver itself
+    // rather than through the loader's dispatch (loader.h).
+    vk::loader::LoadDevice(device);
+#endif
     VkQueue made = VK_NULL_HANDLE;
     vkGetDeviceQueue(device, family, 0, &made);
     *deviceOut = device;
@@ -265,6 +277,8 @@ namespace
     // point is to reach the driver's compiler, which needs neither.
     bool BringUpHeadless()
     {
+        if (!OpenVulkan()) { LOGW("pipeline: no Vulkan library"); return false; }
+
         VkApplicationInfo app{ VK_STRUCTURE_TYPE_APPLICATION_INFO };
         app.pApplicationName = "mw2recomp";
         // 1.1 for negative viewport heights, which is how the renderer expresses the
@@ -276,6 +290,9 @@ namespace
         info.pApplicationInfo = &app;
         VkResult r = vkCreateInstance(&info, nullptr, &g.instance);
         if (r != VK_SUCCESS) { LOGW("pipeline: no Vulkan instance (%s)", Explain(r)); return false; }
+#if defined(MW2_VULKAN_DYNAMIC)
+        vk::loader::LoadInstance(g.instance);
+#endif
 
         uint32_t count = 0;
         vkEnumeratePhysicalDevices(g.instance, &count, nullptr);
@@ -494,6 +511,9 @@ void vk::pipeline::Shutdown()
     g.layout = VK_NULL_HANDLE;
     if (g.ownsDevice)
     {
+#if defined(MW2_VULKAN_DYNAMIC)
+        vk::loader::ForgetDevice();
+#endif
         vkDestroyDevice(g.device, nullptr);
         if (g.instance) vkDestroyInstance(g.instance, nullptr);
         g.instance = VK_NULL_HANDLE;

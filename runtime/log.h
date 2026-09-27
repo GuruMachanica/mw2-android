@@ -31,15 +31,28 @@ namespace mw2log
     }
 }
 
-#ifdef MW2_NO_LOGGING
-#   define MW2_LOG(prefix, fmt, ...) \
-        do { if (false) std::fprintf(stderr, prefix fmt "\n", ##__VA_ARGS__); } while (false)
-#else
-#   define MW2_LOG(prefix, fmt, ...) \
-        std::fprintf(stderr, "%s" prefix fmt "\n", mw2log::Stamp(), ##__VA_ARGS__)
+// Android has no stderr to write to: a process's output goes nowhere unless
+// the device was set up to keep it. The lines go to logcat and to the app's
+// own log screen instead (runtime/android/log.cpp), through one function
+// rather than the macro's format string, so the level survives.
+#ifdef MW2_ANDROID
+namespace mw2log
+{
+    void AndroidWrite(char level, const char* format, ...) __attribute__((format(printf, 2, 3)));
+}
 #endif
 
-#define LOGI(fmt, ...) MW2_LOG("[i] ", fmt, ##__VA_ARGS__)
-#define LOGW(fmt, ...) MW2_LOG("[w] ", fmt, ##__VA_ARGS__)
-#define LOGE(fmt, ...) MW2_LOG("[E] ", fmt, ##__VA_ARGS__)
-#define LOGK(fmt, ...) MW2_LOG("[k] ", fmt, ##__VA_ARGS__)
+#if defined(MW2_NO_LOGGING)
+#   define MW2_LOG_AT(level, fmt, ...) \
+        do { if (false) std::fprintf(stderr, fmt "\n", ##__VA_ARGS__); } while (false)
+#elif defined(MW2_ANDROID)
+#   define MW2_LOG_AT(level, fmt, ...) mw2log::AndroidWrite(level, fmt, ##__VA_ARGS__)
+#else
+#   define MW2_LOG_AT(level, fmt, ...) \
+        std::fprintf(stderr, "%s[%c] " fmt "\n", mw2log::Stamp(), level, ##__VA_ARGS__)
+#endif
+
+#define LOGI(fmt, ...) MW2_LOG_AT('i', fmt, ##__VA_ARGS__)
+#define LOGW(fmt, ...) MW2_LOG_AT('w', fmt, ##__VA_ARGS__)
+#define LOGE(fmt, ...) MW2_LOG_AT('E', fmt, ##__VA_ARGS__)
+#define LOGK(fmt, ...) MW2_LOG_AT('k', fmt, ##__VA_ARGS__)

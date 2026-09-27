@@ -183,6 +183,15 @@ set(FFMPEG_SOURCES
     ${FFMPEG_SRC}/libavutil/xtea.c
 )
 
+# Xenia's config.h is a plain C configuration: ARCH_X86 is 0 and every
+# HAVE_MMX/SSE/AVX is 0, so nothing in the build reaches the x86 files -- but
+# they are still handed to the compiler, and on arm64 they do not compile at
+# all. Off the list they go.
+if(NOT CMAKE_SYSTEM_PROCESSOR MATCHES "^(x86_64|AMD64|i[3-6]86)$")
+    list(FILTER FFMPEG_SOURCES EXCLUDE REGEX "/x86/")
+    message(STATUS "XMA decoder: portable C only (${CMAKE_SYSTEM_PROCESSOR})")
+endif()
+
 add_library(ffmpeg_xma STATIC ${FFMPEG_SOURCES})
 target_include_directories(ffmpeg_xma
     PUBLIC  "${CMAKE_CURRENT_SOURCE_DIR}" "${FFMPEG_SRC}"
@@ -195,6 +204,9 @@ target_compile_definitions(ffmpeg_xma PRIVATE
 target_compile_options(ffmpeg_xma PRIVATE -w -std=gnu17 -fno-strict-aliasing -fomit-frame-pointer
     -Wno-error=incompatible-pointer-types)
 set_target_properties(ffmpeg_xma PROPERTIES POSITION_INDEPENDENT_CODE ON)
-if(NOT WIN32)
+if(NOT WIN32 AND NOT ANDROID)
     target_link_libraries(ffmpeg_xma PUBLIC pthread m)
+elseif(ANDROID)
+    # bionic carries pthread and libm inside libc.
+    target_link_libraries(ffmpeg_xma PUBLIC m)
 endif()

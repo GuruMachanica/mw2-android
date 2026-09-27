@@ -7,7 +7,7 @@
 #include "../../stutters.h"
 #include "../../online/service.h"
 
-#if !defined(MW2_HAVE_VULKAN) || !defined(MW2_USE_SDL)
+#if !defined(MW2_HAVE_VULKAN) || (!defined(MW2_USE_SDL) && !defined(MW2_ANDROID))
 // Without a loader or a window system there is nothing to present to; the rest
 // of the runtime carries on headless.
 bool     vk::Start()           { return false; }
@@ -37,9 +37,21 @@ uint64_t vk::PresentedFrames() { return 0; }
 #include "pipeline.h"
 #include "renderer.h"
 
+#ifdef MW2_USE_SDL
 #include <SDL3/SDL.h>
 #include <SDL3/SDL_vulkan.h>
+#endif
+#ifdef MW2_ANDROID
+#include <android/native_window.h>
+#include "../../android/android.h"
+// The surface extension's declarations. A build that loads Vulkan at run
+// time has had this already (loader.h); one that links it has not.
+#ifndef VK_USE_PLATFORM_ANDROID_KHR
+#define VK_USE_PLATFORM_ANDROID_KHR 1
+#endif
+#endif
 #include <vulkan/vulkan.h>
+#include "loader.h"
 #include "util.h"
 
 namespace
@@ -58,7 +70,16 @@ namespace
 
     struct Presenter
     {
+#ifdef MW2_USE_SDL
         SDL_Window* window = nullptr;
+#endif
+#ifdef MW2_ANDROID
+        // The surface the activity owns. It goes away every time the player
+        // leaves the game and comes back as a different one; `generation`
+        // is how the loop notices.
+        ANativeWindow* nativeWindow = nullptr;
+        uint64_t generation = 0;
+#endif
         VkInstance instance = VK_NULL_HANDLE;
         VkSurfaceKHR surface = VK_NULL_HANDLE;
         VkPhysicalDevice physical = VK_NULL_HANDLE;
@@ -163,10 +184,17 @@ namespace
 
     bool CreateInstance()
     {
+        std::vector<const char*> extensions;
+#ifdef MW2_ANDROID
+        // Android has one window system and it is always there.
+        extensions.push_back(VK_KHR_SURFACE_EXTENSION_NAME);
+        extensions.push_back("VK_KHR_android_surface");
+#else
         uint32_t extensionCount = 0;
         const char* const* sdlExtensions = SDL_Vulkan_GetInstanceExtensions(&extensionCount);
         if (!sdlExtensions) { LOGW("vulkan: SDL has no instance extensions (%s)", SDL_GetError()); return false; }
-        std::vector<const char*> extensions(sdlExtensions, sdlExtensions + extensionCount);
+        extensions.assign(sdlExtensions, sdlExtensions + extensionCount);
+#endif
 
         VkApplicationInfo app{ VK_STRUCTURE_TYPE_APPLICATION_INFO };
         app.pApplicationName = "mw2recomp";
@@ -188,6 +216,11 @@ namespace
         info.enabledExtensionCount = uint32_t(extensions.size());
         info.ppEnabledExtensionNames = extensions.data();
         if (!Check(vkCreateInstance(&info, nullptr, &g.instance), "vkCreateInstance")) return false;
+#if defined(MW2_VULKAN_DYNAMIC)
+        // Everything past this point is called through the driver's own
+        // entry points rather than a link-time symbol (loader.h).
+        vk::loader::LoadInstance(g.instance);
+#endif
         if (validating)
         {
             auto create = reinterpret_cast<PFN_vkCreateDebugUtilsMessengerEXT>(
@@ -304,7 +337,15 @@ namespace
         else
         {
             int width = 0, height = 0;
+#ifdef MW2_ANDROID
+            if (g.nativeWindow)
+            {
+                width = ANativeWindow_getWidth(g.nativeWindow);
+                height = ANativeWindow_getHeight(g.nativeWindow);
+            }
+#else
             SDL_GetWindowSizeInPixels(g.window, &width, &height);
+#endif
             g.extent.width = std::clamp(uint32_t(std::max(width, 0)),
                                         caps.minImageExtent.width, caps.maxImageExtent.width);
             g.extent.height = std::clamp(uint32_t(std::max(height, 0)),
@@ -430,6 +471,14 @@ namespace
     void FollowTheDisplay()
     {
         double hz = 0;
+#ifdef MW2_ANDROID
+        // Display.getRefreshRate, as the app reported it. A phone that can
+        // run at 90 or 120 is asked for 60 by the app where it can, because
+        // the console's frame is a 60 Hz frame and a display at 90 shows
+        // every other one twice.
+        hz = android::RefreshHz();
+        g.exactRate = false;
+#else
         if (const SDL_DisplayMode* mode = SDL_GetCurrentDisplayMode(SDL_GetDisplayForWindow(g.window)))
         {
             // The mode's exact rate, from its pixel clock and totals, when
@@ -438,6 +487,7 @@ namespace
             hz = g.exactRate ? double(mode->refresh_rate_numerator) / mode->refresh_rate_denominator
                              : double(mode->refresh_rate);
         }
+#endif
         g.periodNs = 1e9 / (hz > 0 ? hz : 60.0);
         if (!g.presentWait) return;
         if (hz >= 59.0 && hz <= 61.0)
@@ -717,6 +767,9 @@ namespace
             }
             if (g.pool) vkDestroyCommandPool(g.device, g.pool, nullptr);
             if (g.swapchain) vkDestroySwapchainKHR(g.device, g.swapchain, nullptr);
+#if defined(MW2_VULKAN_DYNAMIC)
+            vk::loader::ForgetDevice();
+#endif
             vkDestroyDevice(g.device, nullptr);
             g.pool = VK_NULL_HANDLE;
             g.swapchain = VK_NULL_HANDLE;
@@ -733,14 +786,115 @@ namespace
             g_messenger = VK_NULL_HANDLE;
         }
         if (g.instance) vkDestroyInstance(g.instance, nullptr);
+#ifdef MW2_USE_SDL
         if (g.window) SDL_DestroyWindow(g.window);
+        g.window = nullptr;
+#endif
+#ifdef MW2_ANDROID
+        if (g.nativeWindow)
+        {
+            android::ReleaseWindow(g.nativeWindow);
+            g.nativeWindow = nullptr;
+            android::WindowReleased();
+        }
+#endif
         g.surface = VK_NULL_HANDLE;
         g.instance = VK_NULL_HANDLE;
-        g.window = nullptr;
     }
+
+#ifdef MW2_ANDROID
+    // The Vulkan surface for the window the activity handed over.
+    bool CreateSurfaceForWindow()
+    {
+#if defined(MW2_VULKAN_DYNAMIC)
+        if (!vkCreateAndroidSurfaceKHR)
+        {
+            LOGE("vulkan: this driver has no VK_KHR_android_surface, so it cannot present");
+            android::SetStatus("This graphics driver cannot present to the screen."
+                               " Switch back to the system driver.");
+            return false;
+        }
+#endif
+        VkAndroidSurfaceCreateInfoKHR info{ VK_STRUCTURE_TYPE_ANDROID_SURFACE_CREATE_INFO_KHR };
+        info.window = g.nativeWindow;
+        return Check(vkCreateAndroidSurfaceKHR(g.instance, &info, nullptr, &g.surface),
+                     "vkCreateAndroidSurfaceKHR");
+    }
+
+    // The activity's surface changed: it was destroyed, or destroyed and made
+    // again. Everything built on the old one goes -- in this order, and
+    // before surfaceDestroyed is allowed to return -- and the new one, if
+    // there is one by now, gets a swapchain.
+    void AdoptNewSurface()
+    {
+        const uint64_t generation = android::WindowGeneration();
+
+        if (g.device)
+        {
+            // Nothing of ours may still be reading or presenting the images.
+            // The renderer submits to the same queue, so its lock is what
+            // makes waiting for the device meaningful.
+            std::lock_guard held(vk::pipeline::QueueMutex());
+            vk::pipeline::Failed(vkDeviceWaitIdle(g.device), "the device before a surface change");
+        }
+        if (g.swapchain)
+        {
+            std::unique_lock life(g.swapchainLife);
+            vkDestroySwapchainKHR(g.device, g.swapchain, nullptr);
+            g.swapchain = VK_NULL_HANDLE;
+            std::lock_guard waiting(g.waitLock);
+            g.waiting.clear();
+            g.lastShownNs = -1;
+        }
+        if (g.surface)
+        {
+            vkDestroySurfaceKHR(g.instance, g.surface, nullptr);
+            g.surface = VK_NULL_HANDLE;
+        }
+        if (g.nativeWindow)
+        {
+            android::ReleaseWindow(g.nativeWindow);
+            g.nativeWindow = nullptr;
+            // surfaceDestroyed is waiting on exactly this.
+            android::WindowReleased();
+        }
+        LetGo();
+
+        g.generation = generation;
+        g.nativeWindow = android::AcquireWindow();
+        if (!g.nativeWindow) return;          // gone for now; the loop waits
+        if (!CreateSurfaceForWindow()) return;
+        g.remakeSwapchain = true;
+        RemakeSwapchain();
+        LOGI("vulkan: presenting to the new surface (%ux%u)", g.extent.width, g.extent.height);
+    }
+#endif
 
     bool Bring()
     {
+#ifdef MW2_ANDROID
+        std::string error;
+        if (!vk::loader::Opened() && !vk::loader::Open(error))
+        {
+            LOGE("vulkan: %s", error.c_str());
+            android::SetStatus(("No Vulkan driver could be opened: " + error).c_str());
+            return false;
+        }
+        // The game thread runs ahead of the activity's layout; the first
+        // surface can be a moment away.
+        while (android::Running() && !android::WaitForWindow(250)) {}
+        if (!android::Running()) return false;
+        g.generation = android::WindowGeneration();
+        g.nativeWindow = android::AcquireWindow();
+        if (!g.nativeWindow) { LOGW("vulkan: no surface to present to"); return false; }
+        if (!CreateInstance()) return false;
+        if (!CreateSurfaceForWindow()) return false;
+        if (!PickDevice() || !CreateDevice() || !CreateSwapchain() || !CreateFrames())
+            return false;
+        vk::pipeline::Initialise(g.device, g.physical, g.queue, g.queueFamily, g.instance);
+        android::SetStatus((std::string("Running on ") + vk::pipeline::DeviceName()).c_str());
+        return true;
+#else
         if (!SDL_InitSubSystem(SDL_INIT_VIDEO))
         {
             LOGW("vulkan: SDL video would not start (%s)", SDL_GetError());
@@ -767,6 +921,7 @@ namespace
         // because an image cannot be shared between two.
         vk::pipeline::Initialise(g.device, g.physical, g.queue, g.queueFamily, g.instance);
         return true;
+#endif
     }
 
     void Worker()
@@ -785,6 +940,22 @@ namespace
 
         while (g.running.load(std::memory_order_relaxed))
         {
+#ifdef MW2_ANDROID
+            // The app asked for the run to end.
+            if (!android::Running()) break;
+            // The activity's surface came, went, or was replaced.
+            if (android::WindowGeneration() != g.generation) AdoptNewSurface();
+            // Nothing to present to, or nothing worth presenting: the frames
+            // the renderer finishes are let go at once, so the guest never
+            // waits on a window that is not there.
+            if (!g.surface || !g.swapchain || android::Paused())
+            {
+                LetGo();
+                std::unique_lock lock(g.lock);
+                g.wake.wait_for(lock, std::chrono::milliseconds(32));
+                continue;
+            }
+#else
             SDL_Event event;
             while (SDL_PollEvent(&event))
                 // Not `g.running = false`: that stops the pump, and with nothing
@@ -851,6 +1022,7 @@ namespace
                 else if (event.type == SDL_EVENT_WINDOW_PIXEL_SIZE_CHANGED ||
                          event.type == SDL_EVENT_WINDOW_RESIZED)
                     g.remakeSwapchain = true;
+#endif  // MW2_ANDROID
 
             // A frame to show, or 16 ms to go round the events again. Until the
             // renderer has finished one, the window shows its own colour.
@@ -874,8 +1046,13 @@ bool vk::Start()
 {
     // A release build is for playing and opens it. A diagnostics build leaves it
     // shut, for headless measurement runs, unless MW2_WINDOW=1. MW2_WINDOW=0
-    // keeps either shut.
+    // keeps either shut. On Android there is nothing else to be: the activity
+    // is already on screen waiting for frames.
+#ifdef MW2_ANDROID
+    const bool window = env::Text("MW2_WINDOW") ? env::Flag("MW2_WINDOW") : true;
+#else
     const bool window = env::Text("MW2_WINDOW") ? env::Flag("MW2_WINDOW") : !diag::kOn;
+#endif
     if (!window) return false;
 
     g.running = true;
@@ -896,6 +1073,19 @@ void vk::ShowImage(void* image, uint32_t width, uint32_t height, uint64_t serial
 void vk::WaitUntilTaken(uint64_t serial)
 {
     if (!serial || !g.running.load(std::memory_order_relaxed)) return;
+#ifdef MW2_ANDROID
+    // The activity is not in front: there is no surface to copy the frame
+    // out to, and waiting a quarter of a second for one, every frame, is a
+    // game running at 4 fps in the background with the phone getting hot.
+    if (android::Paused())
+    {
+        std::lock_guard lock(g.lock);
+        while (!g.frameQueue.empty() && g.frameQueue.front().serial <= serial)
+            g.frameQueue.pop_front();
+        g.taken = std::max(g.taken, serial);
+        return;
+    }
+#endif
     std::unique_lock lock(g.lock);
     if (g.takenWake.wait_for(lock, std::chrono::milliseconds(250),
                              [&] { return g.taken >= serial || !g.running; }))
