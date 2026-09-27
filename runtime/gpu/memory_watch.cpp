@@ -1,4 +1,8 @@
 #include "memory_watch.h"
+
+#ifndef _WIN32
+#include <unistd.h>
+#endif
 #include "../guest_memory.h"
 #include "../log.h"
 
@@ -151,6 +155,21 @@ void gpu::watch::SetShadow(uint8_t* shadow, uint32_t bytes)
         g_enabled.store(false, std::memory_order_release);
         return;
     }
+    // A host page larger than the unit protected here cannot be made to
+    // work: the protection would always spill onto pages this code has not
+    // recorded, and their next write would be taken for a crash. Better to
+    // draw without the shadow than to die at the first one.
+#ifndef _WIN32
+    const long hostPage = sysconf(_SC_PAGESIZE);
+    if (hostPage > 0 && size_t(hostPage) > kPageBytes)
+    {
+        LOGW("gpu: the host's pages are %ld bytes and the watch works in %u;"
+             " the shadow of guest memory stays off", hostPage, kPageBytes);
+        g_shadow = nullptr;
+        g_enabled.store(false, std::memory_order_release);
+        return;
+    }
+#endif
     g_shadow = shadow;
     g_enabled.store(true, std::memory_order_release);
 }
@@ -167,7 +186,21 @@ bool gpu::watch::HandleFault(const void* address)
     if (offset < 0) return false;
     const uint32_t page = uint32_t(offset / kPageBytes);
     // Never watched: the fault is somebody else's.
-    if (g_state[page].load(std::memory_order_acquire) == kNever) return false;
+    if (g_state[page].load(std::memory_order_acquire) == kNever)
+    {
+        // Said once. A write into the physical bank that faults on a page
+        // this code never protected means the protection is landing wider
+        // than it is recorded -- the host's pages are bigger than ours --
+        // and the crash that follows is this code's doing, not the title's.
+        static std::atomic<bool> said{ false };
+        if (!said.exchange(true, std::memory_order_relaxed))
+        {
+            LOGE("gpu: a write to guest %08X faulted on a page the watch never armed."
+                 " If this is followed by a crash, the host's page size is the reason.",
+                 uint32_t(uint64_t(at - base)));
+        }
+        return false;
+    }
     // Loose already: another thread's handler got there first and the page is
     // writable, or is being armed again and the retry will fault properly.
     Loosen(page);

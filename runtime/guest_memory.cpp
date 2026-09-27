@@ -186,6 +186,12 @@ namespace
 
 uint8_t* guest::Initialise()
 {
+#ifndef _WIN32
+    // Worth a line: an Android 15 device has 16 KB pages, everything else
+    // has 4 KB, and the difference decides whether memory protection can
+    // work at the granularity the renderer wants (gpu/memory_watch.h).
+    LOGI("host pages are %ld bytes", sysconf(_SC_PAGESIZE));
+#endif
     if (!ReserveSpace())
     {
         LOGE("could not reserve %llu bytes of address space", (unsigned long long)kSpace);

@@ -16,7 +16,24 @@
 // would have drawn from.
 namespace gpu::watch
 {
+    // The unit the watch protects, and mprotect works in whole pages of the
+    // host's size. 4 KB is every desktop and most phones -- but an Android
+    // 15 device has 16 KB pages, and there a 4 KB protection either fails
+    // outright, because the address is not page aligned, or succeeds and
+    // covers four of these pages while only one of them is recorded as
+    // watched. A write to one of the other three then faults into a handler
+    // that does not recognise the page, and an ordinary guest write becomes
+    // a crash.
+    //
+    // 16 KB on Android is right either way: exact on a 16 KB kernel, and
+    // four whole kernel pages on a 4 KB one, which is legal and still lands
+    // on a single watch page. Coarser, and on a phone that is no loss --
+    // fewer faults and a quarter of the mprotect calls.
+#ifdef MW2_ANDROID
+    constexpr uint32_t kPageBytes = 16384;
+#else
     constexpr uint32_t kPageBytes = 4096;
+#endif
 
     // The copy, as mapped for the CPU: physical address N at `shadow + N`.
     // Null leaves every draw on the per-draw copy (MW2_NO_SHADOW=1 does that).
