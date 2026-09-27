@@ -10,6 +10,7 @@
 #include "objects.h"
 #include "../guest.h"
 #include "../log.h"
+#include "../atomic_ref.h"
 
 #include <atomic>
 #include <mutex>
@@ -29,10 +30,12 @@ namespace
         return *GuestPtr<be32>(ctx.r13.u32 + kCurrentThreadOffset);
     }
 
-    // A big-endian guest word, changed atomically.
-    std::atomic_ref<uint32_t> Word(uint32_t address)
+    // A big-endian guest word, changed atomically. mw2::AtomicRef is
+    // std::atomic_ref where the library has it and the compiler's builtins
+    // where it does not -- the NDK's libc++ 18 does not (runtime/atomic_ref.h).
+    mw2::AtomicRef<uint32_t> Word(uint32_t address)
     {
-        return std::atomic_ref<uint32_t>(*reinterpret_cast<uint32_t*>(guest::Base() + address));
+        return mw2::AtomicRef<uint32_t>(*reinterpret_cast<uint32_t*>(guest::Base() + address));
     }
 
     // Adds and returns the new value, as InterlockedIncrement does.
