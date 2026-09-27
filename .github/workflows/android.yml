@@ -311,17 +311,48 @@ jobs:
           mkdir -p dist
           stamp=$(date -u +%Y%m%d)
           short=${GITHUB_SHA::7}
+          tools=$(ls -d "$ANDROID_HOME"/build-tools/* | sort -V | tail -1)
+
+          # Everything Gradle left behind, named and sized. This used to take
+          # whatever .apk it found and rename it to something tidy, which is
+          # a good way to hand over a file nobody meant to build -- an
+          # unsigned intermediate among them. Android's answer to an unsigned
+          # apk is that the package cannot be parsed, which reads as a
+          # corrupt download.
+          echo "::group::what Gradle produced"
+          find android/app/build/outputs/apk -name "*.apk" -printf "%s\t%p\n" | sort -k2 || true
+          echo "::endgroup::"
+
+          case "${{ inputs.build_type }}" in
+            release) build=release ;;
+            *)       build=debug ;;
+          esac
+          case "${{ inputs.title }}" in
+            campaign)    flavours="campaign" ;;
+            multiplayer) flavours="multiplayer" ;;
+            both)        flavours="campaign multiplayer" ;;
+          esac
+
           found=0
-          while IFS= read -r apk; do
-            flavour=$(basename "$apk" | sed -E 's/^app-([a-z]+)-.*/\1/')
-            name="mw2-$flavour-android-arm64-$stamp-$short.apk"
-            cp "$apk" "dist/$name"
+          for flavour in $flavours; do
+            # The one file the variant is supposed to produce. Named exactly,
+            # not found by pattern.
+            apk="android/app/build/outputs/apk/$flavour/$build/app-$flavour-$build.apk"
+            if [ ! -f "$apk" ]; then
+              echo "::error::$apk was not built. See the list above for what was."
+              exit 1
+            fi
+            # Signed, here, before it is handed over. An unsigned apk cannot
+            # be installed and must never reach the artifact.
+            if ! "$tools/apksigner" verify "$apk" > /dev/null 2>&1; then
+              echo "::error::$apk is not signed; Android would refuse it."
+              "$tools/apksigner" verify --verbose "$apk" || true
+              exit 1
+            fi
+            cp "$apk" "dist/mw2-$flavour-android-arm64-$stamp-$short.apk"
             found=$((found + 1))
-          done < <(find android/app/build/outputs/apk -name "*.apk" | sort)
-          if [ "$found" = 0 ]; then
-            echo "::error::Gradle produced no apk."
-            exit 1
-          fi
+          done
+
           (cd dist && sha256sum *.apk > SHA256SUMS.txt)
           ls -la dist
           echo "count=$found" >> "$GITHUB_OUTPUT"
