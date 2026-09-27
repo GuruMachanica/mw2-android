@@ -121,9 +121,15 @@ target_include_directories(mw2 PRIVATE "${CMAKE_SOURCE_DIR}/runtime")
 # machine produced -- can be handed them instead:
 #   -DMW2_XEX_SHA256_SP=<64 hex> -DMW2_XEX_SHA256_MP=<64 hex>
 if(MW2_XEX_SHA256_SP AND MW2_XEX_SHA256_MP)
+    # CMake's regexes have no {n} repetition -- "{64}" would be matched as
+    # those four characters -- so the length is counted separately.
     foreach(given SP MP)
-        if(NOT MW2_XEX_SHA256_${given} MATCHES "^[0-9a-fA-F]{64}$")
-            message(FATAL_ERROR "MW2_XEX_SHA256_${given} is not a sha256: ${MW2_XEX_SHA256_${given}}")
+        set(hash "${MW2_XEX_SHA256_${given}}")
+        string(LENGTH "${hash}" hash_length)
+        if(NOT hash_length EQUAL 64 OR NOT hash MATCHES "^[0-9a-fA-F]+$")
+            message(FATAL_ERROR
+                "MW2_XEX_SHA256_${given} is not a sha256 (64 hex characters, got"
+                " ${hash_length}): ${hash}")
         endif()
     endforeach()
     message(STATUS "XEX hashes given on the command line; mw2/ is not needed")
