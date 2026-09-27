@@ -115,7 +115,17 @@ namespace
         // the process dying, so it must be asked first.
         if (sig == SIGSEGV && watchpoint::HandleWrite(info, uctx)) return;
         // A write to a page the GPU's shadow of guest memory watches.
-        if (sig == SIGSEGV && info->si_code == SEGV_ACCERR && gpu::watch::HandleFault(info->si_addr)) return;
+        //
+        // Any SIGSEGV, whatever the kernel calls it. Writing to a page the
+        // watch made read-only is SEGV_ACCERR on an x86 Linux desktop, and
+        // this phone's kernel reports the very same thing as SEGV_MAPERR --
+        // "nothing is mapped there", with /proc/self/maps showing the page
+        // right where it should be, r--s, in the physical bank. Gating on
+        // the code meant the handler was never asked, and an ordinary
+        // watched write -- the event the watch exists for -- was taken for
+        // a crash. The watch checks the address and its own record of the
+        // page before it claims a fault, so asking it is safe.
+        if (sig == SIGSEGV && gpu::watch::HandleFault(info->si_addr)) return;
         if (sig == SIGTRAP && watchpoint::HandleStep(uctx)) return;
 
         uint8_t* base = guest::Base();
