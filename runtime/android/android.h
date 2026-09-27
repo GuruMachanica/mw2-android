@@ -195,6 +195,8 @@ namespace android::perf
     uint32_t AvailableMemoryMB();
     // ComponentCallbacks2.onTrimMemory: release what can be released.
     void TrimMemory(int level);
+    // The other half of it, when the run comes back.
+    void RestoreMemory();
     // Sets the defaults the renderer reads out of the environment, sized for
     // this device, before anything reads them. Never overrides a value the
     // app set itself.

@@ -545,6 +545,10 @@ class GameActivity : AppCompatActivity(), NativeListener {
         goFullscreen()
         if (!started) return
         NativeBridge.nativeSetPaused(false)
+        // A trim while the window was away may have cut the texture cache.
+        // Without this it stays cut, and every texture is uploaded again on
+        // every draw for the rest of the run.
+        NativeBridge.nativeRestoreMemory()
         pads.setEnabled(prefs.gamepadEnabled)
         pads.refreshDevices()
         handler.post(statsTick)
@@ -577,6 +581,10 @@ class GameActivity : AppCompatActivity(), NativeListener {
         // The texture cache is the only thing here big enough to be worth
         // giving back, and it can rebuild what it drops
         // (runtime/android/perf.cpp).
+        // UI_HIDDEN (20) says the window went away, not that memory is
+        // short, and it arrives on every switch away. It is passed on so the
+        // runtime can say so in the log, but the levels that mean pressure
+        // while running are RUNNING_LOW and RUNNING_CRITICAL.
         if (NativeBridge.isLoaded() && level >= ComponentCallbacks2.TRIM_MEMORY_RUNNING_LOW) {
             NativeBridge.nativeTrimMemory(level)
         }

@@ -193,10 +193,36 @@ void android::perf::ApplyMemoryDefaults()
 
 // ComponentCallbacks2: 5 RUNNING_MODERATE, 10 RUNNING_LOW, 15 RUNNING_CRITICAL,
 // 20 UI_HIDDEN, 40 BACKGROUND, 60 MODERATE, 80 COMPLETE.
+// Back to what the device was judged able to hold. Called when a run
+// resumes: a budget cut under pressure has to be given back, or the cut is
+// permanent and every texture is uploaded again on every draw.
+void android::perf::RestoreMemory()
+{
+    if (!g_fullTextureBudget) return;
+    if (vk::textures::Budget() >= g_fullTextureBudget) return;
+    vk::textures::SetBudget(g_fullTextureBudget);
+    LOGI("perf: the texture budget is back to %llu MB",
+         (unsigned long long)(g_fullTextureBudget >> 20));
+}
+
 void android::perf::TrimMemory(int level)
 {
     const uint64_t budget = vk::textures::Budget();
     if (budget && !g_fullTextureBudget) g_fullTextureBudget = budget;
+
+    // TRIM_MEMORY_UI_HIDDEN is 20 and says the window went away, not that
+    // memory is short -- and it arrives every time the player switches away
+    // for a moment. Read as pressure, it quartered the texture cache on a
+    // phone with four gigabytes free, and nothing put it back: the run came
+    // out of the pause uploading every texture it drew, for ever. The levels
+    // that mean pressure while running are 5, 10 and 15; the ones above are
+    // about where the process sits in the list of things to kill.
+    if (level == 20)
+    {
+        LOGI("perf: the window is hidden (level 20); that is not memory pressure,"
+             " the texture budget is left alone");
+        return;
+    }
 
     if (level >= 15)
     {

@@ -392,6 +392,11 @@ MW2_NATIVE(void, nativeTrimMemory)(JNIEnv*, jobject, jint level)
     android::perf::TrimMemory(int(level));
 }
 
+MW2_NATIVE(void, nativeRestoreMemory)(JNIEnv*, jobject)
+{
+    android::perf::RestoreMemory();
+}
+
 MW2_NATIVE(void, nativeSetRefreshRate)(JNIEnv*, jobject, jfloat hz)
 {
     android::detail::SetRefreshHz(double(hz));

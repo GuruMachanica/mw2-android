@@ -70,6 +70,9 @@ object NativeBridge {
     external fun nativeSurfaceDestroyed()
     external fun nativeSetPaused(paused: Boolean)
     external fun nativeTrimMemory(level: Int)
+
+    /** Give back what a trim took away, once the run is in front again. */
+    external fun nativeRestoreMemory()
     external fun nativeSetRefreshRate(hz: Float)
 
     // ---- input ------------------------------------------------------------
