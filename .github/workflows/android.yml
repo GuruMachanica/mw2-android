@@ -93,6 +93,25 @@ jobs:
           sudo apt-get clean
           echo "after:"; df -h / | tail -1
 
+      # Cheap, and it caught a real failure: the app's Kotlin was once not
+      # committed, and the build happily produced an apk with no classes in
+      # it that died the moment it was launched.
+      - name: Check the app's sources are actually here
+        run: |
+          set -euo pipefail
+          count=$(git ls-files 'android/app/src/main/java/**/*.kt' | wc -l)
+          echo "$count Kotlin sources tracked"
+          if [ "$count" -lt 10 ]; then
+            echo "::error::Only $count Kotlin sources are tracked by git. The apk would have no classes."
+            exit 1
+          fi
+          for klass in MainActivity GameActivity SettingsActivity DriverActivity InstallActivity FileBrowserActivity MW2Application; do
+            if ! git ls-files | grep -q "android/app/src/main/java/com/mw2/recomp/$klass.kt"; then
+              echo "::error::$klass is named in the manifest but its source is not in the repository."
+              exit 1
+            fi
+          done
+
       - uses: actions/setup-java@v4
         with:
           distribution: temurin

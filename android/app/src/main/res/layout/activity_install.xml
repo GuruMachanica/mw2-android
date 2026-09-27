@@ -36,10 +36,17 @@
             android:textSize="13sp" />
 
         <Button
-            android:id="@+id/choose"
+            android:id="@+id/pick"
             android:layout_width="match_parent"
             android:layout_height="wrap_content"
             android:layout_marginTop="10dp"
+            android:text="@string/pick_with_files" />
+
+        <Button
+            android:id="@+id/choose"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="8dp"
             android:text="@string/choose_source" />
 
         <Button

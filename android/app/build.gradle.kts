@@ -22,6 +22,19 @@ val repositoryRoot = file("../..")
 //   MW2_KEYSTORE and friends  a signing key, so the apk is installable
 fun setting(name: String): String? = System.getenv(name)?.trim()?.ifEmpty { null }
 
+// The app's own sources have to be here. They went missing once -- written,
+// built against, and never committed -- and the result was an apk that
+// installed, launched, and died on a manifest pointing at classes that did
+// not exist. An empty source tree is not a warning, it is a broken build.
+val kotlinSources = fileTree("src/main/java") { include("**/*.kt") }.files
+if (kotlinSources.size < 10) {
+    throw GradleException(
+        "Only ${kotlinSources.size} Kotlin sources under android/app/src/main/java. " +
+            "The app cannot be built from this tree -- check that they are committed " +
+            "(git ls-files '*.kt')."
+    )
+}
+
 android {
     namespace = "com.mw2.recomp"
     compileSdk = 35

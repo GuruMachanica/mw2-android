@@ -22,7 +22,7 @@
 
     <!-- installing -->
     <string name="install_hint">Point this at a disc image (.iso) of your own copy, or at a folder holding the files from one. Everything needed is copied into the app\'s own storage and checked as it goes; about 7 GB of free space is wanted.</string>
-    <string name="choose_source">Choose the disc image or folder</string>
+    <string name="choose_source">Browse the phone\u2019s storage</string>
     <string name="begin_install">Install</string>
     <string name="no_source">Nothing chosen yet.</string>
     <string name="chosen">Installing from:\n%1$s</string>
@@ -32,6 +32,17 @@
     <string name="install_cancelled">Cancelled. What was copied is kept, so starting again carries on from there.</string>
     <string name="install_running_warning">The install is still running. Leaving now stops it; it can be carried on later.</string>
     <string name="no_space">There is not enough free space: %1$s free, about 7 GB needed.</string>
+
+    <string name="unknown_reason">no reason given</string>
+    <string name="last_crash">The app stopped last time</string>
+    <string name="log_empty">Nothing logged yet.</string>
+
+    <!-- bringing a file in through the system picker -->
+    <string name="pick_with_files">Choose with the Files app</string>
+    <string name="import_file">Import</string>
+    <string name="import_explained">The Files app hands over a document rather than a path, so the file is copied into this app first: %1$s now, and about 7 GB again for the installed game. %2$s is free.\n\nIf space is tight, use “Browse the phone’s storage” instead — it reads the file where it lies.</string>
+    <string name="import_explained_unknown">The Files app hands over a document rather than a path, so the file is copied into this app first. A disc image is several gigabytes, and the installed game needs about 7 GB more.\n\nIf space is tight, use “Browse the phone’s storage” instead — it reads the file where it lies.</string>
+    <string name="copying">Copying in: %1$s</string>
 
     <!-- the file browser -->
     <string name="use_this_folder">Use this folder</string>
