@@ -45,7 +45,10 @@ target_link_libraries(mw2 PRIVATE aaudio android log dl)
 # app still runs on the system's driver and says so.
 set(MW2_ADRENOTOOLS_DIR "${CMAKE_SOURCE_DIR}/third_party/libadrenotools")
 if(EXISTS "${MW2_ADRENOTOOLS_DIR}/CMakeLists.txt")
-    add_subdirectory("${MW2_ADRENOTOOLS_DIR}" adrenotools EXCLUDE_FROM_ALL)
+    # Not EXCLUDE_FROM_ALL: its hook libraries have to be in the apk, and a
+    # target excluded from the default build is not something the Android
+    # plugin reliably packages. They are small.
+    add_subdirectory("${MW2_ADRENOTOOLS_DIR}" adrenotools)
     target_link_libraries(mw2 PRIVATE adrenotools)
     target_compile_definitions(mw2 PRIVATE MW2_HAVE_ADRENOTOOLS=1)
     # Its two hook libraries are dlopened by the driver at run time, so they

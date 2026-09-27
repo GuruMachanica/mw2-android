@@ -28,6 +28,9 @@
 #include "../log.h"
 
 #include <dlfcn.h>
+#include <cerrno>
+#include <sys/stat.h>
+#include <sys/types.h>
 
 #include <cstring>
 #include <mutex>
@@ -149,6 +152,28 @@ namespace
         if (path.empty() || path.back() == '/') return path;
         return path + "/";
     }
+
+    // Every early refusal inside adrenotools_open_libvulkan is a bare
+    // "return nullptr" with no dlerror set, which is why a failure there
+    // reads as "no reason given". Two of them are about directories that
+    // have to exist before the call: the one it writes the patched driver
+    // into, and the one it redirects the driver's own file writes to. So
+    // they are made here, and everything it is about to be told is checked
+    // and said out loud first.
+    bool MakeDirectory(const std::string& path)
+    {
+        if (path.empty()) return false;
+        std::string without = path;
+        while (without.size() > 1 && without.back() == '/') without.pop_back();
+        if (::mkdir(without.c_str(), 0700) == 0) return true;
+        return errno == EEXIST;
+    }
+
+    bool Exists(const std::string& path)
+    {
+        struct stat info{};
+        return ::stat(path.c_str(), &info) == 0;
+    }
 }
 
 void android::driver::Select(const char* directory, const char* libraryName)
@@ -182,6 +207,25 @@ void* android::driver::Open(std::string& error)
         // write beside itself ends up (Turnip's debug files, a shader dump).
         const std::string temporary = AsDirectory(paths.cache) + "driver_tmp/";
         const std::string redirect = AsDirectory(paths.files) + "driver_files/";
+        if (!MakeDirectory(temporary))
+            LOGW("driver: could not make %s", temporary.c_str());
+        if (!MakeDirectory(redirect))
+            LOGW("driver: could not make %s", redirect.c_str());
+
+        // The hook libraries are dlopened by name out of the apk's own
+        // library directory. If the build did not package them there is
+        // nothing adrenotools can do, and it will not say so itself.
+        const std::string hooks = AsDirectory(paths.nativeLib);
+        for (const char* hook : { "libmain_hook.so", "libhook_impl.so" })
+        {
+            if (!Exists(hooks + hook))
+                LOGW("driver: %s%s is missing -- it is not in this apk, so the imported"
+                     " driver cannot be loaded", hooks.c_str(), hook);
+        }
+        if (!Exists(AsDirectory(g_directory) + g_libraryName))
+            LOGW("driver: %s%s is not there", AsDirectory(g_directory).c_str(),
+                 g_libraryName.c_str());
+
         g_handle = adrenotools_open_libvulkan(
             RTLD_NOW | RTLD_LOCAL,
             ADRENOTOOLS_DRIVER_CUSTOM | ADRENOTOOLS_DRIVER_FILE_REDIRECT,
@@ -200,8 +244,13 @@ void* android::driver::Open(std::string& error)
             dlclose(g_handle);
             g_handle = nullptr;
         }
-        LOGW("driver: adrenotools could not load %s (%s)", g_libraryName.c_str(),
-             dlerror() ? dlerror() : "no reason given");
+        // Its refusals are silent, so the reason is worth narrowing down.
+        LOGW("driver: adrenotools could not load %s (%s); driver dir %s, hooks %s,"
+             " redirect %s", g_libraryName.c_str(),
+             dlerror() ? dlerror() : "it refused before opening anything",
+             Exists(AsDirectory(g_directory) + g_libraryName) ? "ok" : "MISSING",
+             Exists(hooks + "libmain_hook.so") ? "ok" : "MISSING",
+             Exists(redirect) ? "ok" : "MISSING");
 #endif
         // Straight dlopen. A driver that carries its own Android WSI works;
         // one that expects the platform loader above it will not present, and
