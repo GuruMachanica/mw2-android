@@ -31,6 +31,7 @@ uint64_t vk::PresentedFrames() { return 0; }
 #include <thread>
 #include <chrono>
 #include <algorithm>
+#include <utility>
 #include <vector>
 
 #include "capture.h"
@@ -95,6 +96,12 @@ namespace
         // remade before the next frame. A window of no size -- minimised -- has
         // nothing to remake it for, and frames are skipped until it has one.
         bool remakeSwapchain = false;
+        // The surface reports a rotation this renderer does not apply, and
+        // the swapchain was made with identity on purpose (see below). Vulkan
+        // answers every acquire and every present with SUBOPTIMAL for as long
+        // as that is true, which is correct and permanent -- it must not be
+        // read as "remake me".
+        bool suboptimalIsExpected = false;
         bool fullscreen = false;
         uint64_t swapchainsMade = 0;
 
@@ -402,7 +409,11 @@ namespace
         info.preTransform = (caps.supportedTransforms & VK_SURFACE_TRANSFORM_IDENTITY_BIT_KHR)
                                 ? VK_SURFACE_TRANSFORM_IDENTITY_BIT_KHR
                                 : caps.currentTransform;
-        if (info.preTransform != caps.currentTransform)
+        g.suboptimalIsExpected = info.preTransform != caps.currentTransform;
+        // Once. This is remade on every rotation and every resize, and a line
+        // a frame is its own performance problem.
+        static bool toldAboutTheTransform = false;
+        if (g.suboptimalIsExpected && !std::exchange(toldAboutTheTransform, true))
             LOGI("vulkan: the panel is mounted %s; the compositor turns the frame",
                  caps.currentTransform == VK_SURFACE_TRANSFORM_ROTATE_90_BIT_KHR  ? "a quarter turn"
                  : caps.currentTransform == VK_SURFACE_TRANSFORM_ROTATE_180_BIT_KHR ? "upside down"
@@ -656,7 +667,7 @@ namespace
         // remade next frame. Suboptimal: an image was acquired and is shown,
         // since the semaphore it signals has to be waited on, and then remade.
         if (acquired == VK_ERROR_OUT_OF_DATE_KHR) { g.remakeSwapchain = true; return; }
-        if (acquired == VK_SUBOPTIMAL_KHR) g.remakeSwapchain = true;
+        if (acquired == VK_SUBOPTIMAL_KHR) { if (!g.suboptimalIsExpected) g.remakeSwapchain = true; }
         else if (acquired != VK_SUCCESS) return;
 
         Presenter::Queued shown;
@@ -775,7 +786,8 @@ namespace
             std::lock_guard queueLock(vk::pipeline::QueueMutex());
             return vkQueuePresentKHR(g.queue, &present);
         }();
-        if (presented == VK_ERROR_OUT_OF_DATE_KHR || presented == VK_SUBOPTIMAL_KHR)
+        if (presented == VK_ERROR_OUT_OF_DATE_KHR ||
+            (presented == VK_SUBOPTIMAL_KHR && !g.suboptimalIsExpected))
             g.remakeSwapchain = true;
         else
             vk::pipeline::Failed(presented, "present");
