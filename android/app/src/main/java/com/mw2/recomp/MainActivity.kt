@@ -98,7 +98,10 @@ class MainActivity : AppCompatActivity() {
                 NativeBridge.loadError() ?: getString(R.string.unknown_reason),
             )
             play.isEnabled = false
-            footer.text = device()
+            footer.text = getString(
+                R.string.footer, device(), getString(R.string.driver_system),
+                BuildConfig.BUILD_SHA, BuildConfig.BUILD_STAMP,
+            )
             return
         }
 
@@ -111,7 +114,10 @@ class MainActivity : AppCompatActivity() {
         else getString(R.string.status_not_installed)
 
         applyDriverChoice()
-        footer.text = getString(R.string.footer, device(), currentDriverName())
+        footer.text = getString(
+            R.string.footer, device(), currentDriverName(),
+            BuildConfig.BUILD_SHA, BuildConfig.BUILD_STAMP,
+        )
     }
 
     private fun device(): String =

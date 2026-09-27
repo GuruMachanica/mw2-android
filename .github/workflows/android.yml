@@ -269,6 +269,7 @@ jobs:
         working-directory: android
         env:
           MW2_NDK_VERSION: ${{ env.NDK_VERSION }}
+          MW2_BUILD_SHA: ${{ github.sha }}
           MW2_NATIVE_OPTIMISATION: ${{ inputs.optimisation }}
           MW2_COMPILER_LAUNCHER: ccache
           # A key, if one was put in the secrets; otherwise the debug key
@@ -279,6 +280,10 @@ jobs:
           MW2_KEY_PASSWORD: ${{ secrets.KEY_PASSWORD }}
         run: |
           set -euo pipefail
+          # Stamped into the apk so the launcher can say which build it is.
+          export MW2_BUILD_SHA="${MW2_BUILD_SHA::7}"
+          export MW2_BUILD_STAMP="$(date -u '+%Y-%m-%d %H:%M') UTC, run ${{ github.run_number }}"
+          echo "building $MW2_BUILD_SHA ($MW2_BUILD_STAMP)"
           if [ -n "${KEYSTORE_BASE64:-}" ]; then
             printf '%s' "$KEYSTORE_BASE64" | base64 -d > "$RUNNER_TEMP/signing.jks"
             export MW2_KEYSTORE="$RUNNER_TEMP/signing.jks"
@@ -399,6 +404,7 @@ jobs:
             echo
             echo "| | |"
             echo "|---|---|"
+            echo "| build | \`${GITHUB_SHA::7}\` (run ${{ github.run_number }}) |"
             echo "| app | ${{ inputs.title }} |"
             echo "| build | ${{ inputs.build_type }} |"
             echo "| code | \`${{ inputs.optimisation }}\` |"

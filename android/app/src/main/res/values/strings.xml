@@ -18,7 +18,7 @@
     <string name="status_ready">Ready to play.\nThe game files are in %1$s.</string>
     <string name="status_not_installed">The game files are not installed yet.\n\nThis app contains no game data. You supply your own copy: a disc image of the game you own, or a folder with its files in it.</string>
     <string name="status_library_missing">The runtime could not be loaded:\n%1$s</string>
-    <string name="footer">%1$s\nDriver: %2$s</string>
+    <string name="footer">%1$s\nDriver: %2$s\nBuild %3$s, %4$s</string>
 
     <!-- installing -->
     <string name="install_hint">Point this at a disc image (.iso) of your own copy, or at a folder holding the files from one. Everything needed is copied into the app\'s own storage and checked as it goes; about 7 GB of free space is wanted.</string>

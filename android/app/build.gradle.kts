@@ -50,7 +50,14 @@ android {
         minSdk = 26
         targetSdk = 35
         versionCode = 1
-        versionName = "1.0"
+        // Which build this is, carried inside the apk. "The wrong apk" has
+        // cost more than one evening, and every time the only way to settle
+        // it was to guess. The launcher shows this and Android's app info
+        // shows it, so the file on the phone can be matched against the run
+        // that made it without downloading anything twice.
+        versionName = "1.0 (${setting("MW2_BUILD_SHA") ?: "local"})"
+        buildConfigField("String", "BUILD_SHA", "\"${setting("MW2_BUILD_SHA") ?: "local"}\"")
+        buildConfigField("String", "BUILD_STAMP", "\"${setting("MW2_BUILD_STAMP") ?: "unstamped"}\"")
 
         ndk {
             // The guest's address space is 4 GiB reserved in one mapping, so
