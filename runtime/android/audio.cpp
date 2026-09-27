@@ -185,8 +185,16 @@ namespace
         AAudioStreamBuilder_setChannelCount(builder, int32_t(kOutChannels));
         AAudioStreamBuilder_setSampleRate(builder, int32_t(kGuestRate));
         AAudioStreamBuilder_setPerformanceMode(builder, AAUDIO_PERFORMANCE_MODE_LOW_LATENCY);
-        AAudioStreamBuilder_setUsage(builder, AAUDIO_USAGE_GAME);
-        AAudioStreamBuilder_setContentType(builder, AAUDIO_CONTENT_TYPE_MUSIC);
+        // What the stream is for. The system routes and ducks by it -- a game
+        // keeps playing under a notification where music would be quietened.
+        // Both arrived in Android 9, and this app runs on 8, so they are
+        // asked for only where they exist; without them the stream is treated
+        // as media, which is right enough that nobody would notice.
+        if (__builtin_available(android 28, *))
+        {
+            AAudioStreamBuilder_setUsage(builder, AAUDIO_USAGE_GAME);
+            AAudioStreamBuilder_setContentType(builder, AAUDIO_CONTENT_TYPE_MUSIC);
+        }
         AAudioStreamBuilder_setDataCallback(builder, OnData, nullptr);
         AAudioStreamBuilder_setErrorCallback(builder, OnError, nullptr);
 
