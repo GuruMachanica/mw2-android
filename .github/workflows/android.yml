@@ -326,6 +326,30 @@ jobs:
           ls -la dist
           echo "count=$found" >> "$GITHUB_OUTPUT"
 
+      # "There was a problem parsing the package" on the phone means the file
+      # the installer got was not a readable, signed apk. That can happen
+      # here or on the way down, and the two are worth telling apart before
+      # anyone spends an evening on it -- so the apk is verified where it was
+      # made, and its hash published so the copy on the phone can be checked
+      # against this one.
+      - name: Verify the apks
+        run: |
+          set -euo pipefail
+          tools=$(ls -d "$ANDROID_HOME"/build-tools/* | sort -V | tail -1)
+          echo "using $tools"
+          for apk in dist/*.apk; do
+            echo "::group::$apk"
+            ls -la "$apk"
+            # A zip that does not open is the commonest cause by far.
+            unzip -t "$apk" > /dev/null && echo "zip: intact"
+            "$tools/apksigner" verify --verbose "$apk" || {
+              echo "::error::$apk is not correctly signed -- Android would refuse it"
+              exit 1
+            }
+            "$tools/aapt2" dump badging "$apk" | grep -E "^package:|sdkVersion:|native-code:" || true
+            echo "::endgroup::"
+          done
+
       - uses: actions/upload-artifact@v4
         with:
           name: android-apk
@@ -348,6 +372,16 @@ jobs:
             echo '```'
             cat dist/SHA256SUMS.txt
             echo '```'
+            echo
+            echo "| file | size |"
+            echo "|---|---|"
+            for apk in dist/*.apk; do
+              echo "| $(basename "$apk") | $(du -h "$apk" | cut -f1) |"
+            done
+            echo
+            echo "If the phone says the package cannot be parsed, check the file you"
+            echo "downloaded has exactly this size and hash: that message almost always"
+            echo "means a truncated download rather than a bad build."
             echo
             echo "Download it from the **Artifacts** section of this run."
             echo "The apk carries no game data: it installs from your own copy,"
