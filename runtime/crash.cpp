@@ -19,6 +19,7 @@
 #if !defined(__ANDROID__)
 #include <execinfo.h>   // bionic has none; platform::PrintBacktrace unwinds instead
 #endif
+#include <fcntl.h>
 #include <unistd.h>
 #include <pthread.h>
 #include <deque>
@@ -54,6 +55,60 @@ namespace
 #endif
     }
 
+    // The line of /proc/self/maps that covers an address, straight from the
+    // file: the only account of the address space that cannot be out of
+    // date. Raw syscalls and no allocation, because this runs in a signal
+    // handler after something has already gone wrong.
+    void PrintMapping(const void* address)
+    {
+        const int fd = ::open("/proc/self/maps", O_RDONLY);
+        if (fd < 0) return;
+        const uintptr_t want = uintptr_t(address);
+        char buffer[8192];
+        std::string held;
+        ssize_t got;
+        bool found = false;
+        while (!found && (got = ::read(fd, buffer, sizeof buffer)) > 0)
+        {
+            held.append(buffer, size_t(got));
+            size_t start = 0;
+            for (;;)
+            {
+                const size_t nl = held.find('\n', start);
+                if (nl == std::string::npos) break;
+                const std::string line = held.substr(start, nl - start);
+                start = nl + 1;
+                unsigned long long from = 0, to = 0;
+                if (std::sscanf(line.c_str(), "%llx-%llx", &from, &to) == 2 &&
+                    want >= from && want < to)
+                {
+                    std::fprintf(stderr, "[E] mapped as: %s\n", line.c_str());
+                    found = true;
+                    break;
+                }
+            }
+            held.erase(0, start);
+        }
+        if (!found) std::fprintf(stderr, "[E] mapped as: nothing -- the address is in no mapping\n");
+        ::close(fd);
+    }
+
+    void DescribeFault(int sig, siginfo_t* info, const void* addr)
+    {
+        const char* what = "?";
+        if (sig == SIGSEGV)
+            what = info->si_code == SEGV_MAPERR ? "SEGV_MAPERR, nothing is mapped there"
+                 : info->si_code == SEGV_ACCERR ? "SEGV_ACCERR, mapped but the access is not allowed"
+                                                : "an unfamiliar SIGSEGV code";
+        else if (sig == SIGBUS)
+            what = info->si_code == BUS_ADRALN ? "BUS_ADRALN, the address is misaligned"
+                 : info->si_code == BUS_ADRERR ? "BUS_ADRERR, no object behind the mapping"
+                 : info->si_code == BUS_OBJERR ? "BUS_OBJERR, the object behind it failed"
+                                               : "an unfamiliar SIGBUS code";
+        std::fprintf(stderr, "[E] %s (si_code %d)\n", what, info->si_code);
+        PrintMapping(addr);
+    }
+
     void FaultHandler(int sig, siginfo_t* info, void* uctx)
     {
         // A write watchpoint takes the page's faults and steps over them; it is not
@@ -71,6 +126,12 @@ namespace
                          : (sig == SIGTRAP) ? "SIGTRAP" : "SIGILL";
 
         std::fprintf(stderr, "\n[E] ---- guest fault: %s at host %p ----\n", name, addr);
+        // Which kind, in the kernel's own words. This is the difference
+        // between "nothing is mapped there" and "it is mapped and you may
+        // not write to it", and those have entirely different causes -- one
+        // is a hole in the address space, the other is something that called
+        // mprotect. Guessing between them has cost a day already.
+        DescribeFault(sig, info, addr);
         // The recompiler turns the PowerPC trap instructions into a host trap, and
         // IW4 builds its asserts out of them -- so this is the title saying one of its
         // own invariants broke, not the runtime crashing.
