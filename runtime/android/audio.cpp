@@ -17,6 +17,7 @@
 #include "../log.h"
 
 #include <aaudio/AAudio.h>
+#include <dlfcn.h>
 
 #include <algorithm>
 #include <atomic>
@@ -169,6 +170,33 @@ namespace
         g_needRestart.store(true, std::memory_order_release);
     }
 
+    // What the stream is for. The system routes and ducks by it: a game keeps
+    // playing under a notification where music would be quietened.
+    //
+    // Both calls arrived in Android 9 and the NDK's headers say so, which on
+    // a build whose minimum is Android 8 makes the declaration *unavailable*
+    // rather than merely new -- and an unavailable declaration cannot be
+    // reached at all, not even inside __builtin_available, because the error
+    // is about naming it. So they are not named: the symbols are looked up
+    // by name in what is already loaded, and skipped on the phones that do
+    // not have them. There the stream is treated as media, which changes how
+    // the system ducks it and nothing a player would notice.
+    void DescribeStream(AAudioStreamBuilder* builder)
+    {
+        using SetUsage = void (*)(AAudioStreamBuilder*, aaudio_usage_t);
+        using SetContentType = void (*)(AAudioStreamBuilder*, aaudio_content_type_t);
+
+        // libaaudio is a dependency of this library, so it is in the global
+        // namespace already; this is a lookup, not a load.
+        static SetUsage setUsage =
+            reinterpret_cast<SetUsage>(dlsym(RTLD_DEFAULT, "AAudioStreamBuilder_setUsage"));
+        static SetContentType setContentType =
+            reinterpret_cast<SetContentType>(dlsym(RTLD_DEFAULT, "AAudioStreamBuilder_setContentType"));
+
+        if (setUsage) setUsage(builder, AAUDIO_USAGE_GAME);
+        if (setContentType) setContentType(builder, AAUDIO_CONTENT_TYPE_MUSIC);
+    }
+
     bool OpenLocked()
     {
         AAudioStreamBuilder* builder = nullptr;
@@ -185,16 +213,7 @@ namespace
         AAudioStreamBuilder_setChannelCount(builder, int32_t(kOutChannels));
         AAudioStreamBuilder_setSampleRate(builder, int32_t(kGuestRate));
         AAudioStreamBuilder_setPerformanceMode(builder, AAUDIO_PERFORMANCE_MODE_LOW_LATENCY);
-        // What the stream is for. The system routes and ducks by it -- a game
-        // keeps playing under a notification where music would be quietened.
-        // Both arrived in Android 9, and this app runs on 8, so they are
-        // asked for only where they exist; without them the stream is treated
-        // as media, which is right enough that nobody would notice.
-        if (__builtin_available(android 28, *))
-        {
-            AAudioStreamBuilder_setUsage(builder, AAUDIO_USAGE_GAME);
-            AAudioStreamBuilder_setContentType(builder, AAUDIO_CONTENT_TYPE_MUSIC);
-        }
+        DescribeStream(builder);
         AAudioStreamBuilder_setDataCallback(builder, OnData, nullptr);
         AAudioStreamBuilder_setErrorCallback(builder, OnError, nullptr);
 
