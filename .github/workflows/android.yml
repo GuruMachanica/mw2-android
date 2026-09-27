@@ -27,8 +27,12 @@ name: android
 on:
   workflow_dispatch:
     inputs:
+      archive_url:
+        description: "Link to one zip (or 7z) holding both executables. The simplest way: fill this in and leave the next two empty."
+        required: false
+        default: ""
       default_xex_url:
-        description: "Link to default.xex (Drive / Hugging Face / direct). Empty: the DEFAULT_XEX_URL secret."
+        description: "Link to default.xex on its own, if you would rather not zip them."
         required: false
         default: ""
       default_mp_xex_url:
@@ -117,6 +121,7 @@ jobs:
         env:
           # A link handed in through the form, or the secret when the form was
           # left empty. Either way it is masked out of the log below.
+          ARCHIVE_URL: ${{ inputs.archive_url || secrets.GAME_ARCHIVE_URL }}
           XEX_URL: ${{ inputs.default_xex_url || secrets.DEFAULT_XEX_URL }}
           MP_URL: ${{ inputs.default_mp_xex_url || secrets.DEFAULT_MP_XEX_URL }}
           ISO_URL: ${{ inputs.iso_url || secrets.ISO_URL }}
@@ -124,22 +129,30 @@ jobs:
         run: |
           set -euo pipefail
           links=()
-          for pair in "default.xex=$XEX_URL" "default_mp.xex=$MP_URL" "game.iso=$ISO_URL"; do
+          # An archive and a disc image name what they hold themselves; a
+          # link to one executable says which it is.
+          for pair in "archive=$ARCHIVE_URL" "image=$ISO_URL" \
+                      "default.xex=$XEX_URL" "default_mp.xex=$MP_URL"; do
             url=${pair#*=}
+            name=${pair%%=*}
             if [ -n "$url" ]; then
               echo "::add-mask::$url"
-              links+=("$pair")
+              case "$name" in
+                archive|image) links+=("$url") ;;
+                *)             links+=("$name=$url") ;;
+              esac
             fi
           done
           if [ ${#links[@]} -eq 0 ]; then
-            echo "::error::No link given. Fill the form in, or set the DEFAULT_XEX_URL and DEFAULT_MP_XEX_URL secrets."
+            echo "::error::No link given. Fill the form in, or set the GAME_ARCHIVE_URL secret (or DEFAULT_XEX_URL and DEFAULT_MP_XEX_URL)."
             exit 1
           fi
-          # A disc image carries both executables, so nothing is demanded up
-          # front; two separate links have to be both.
-          required=()
-          if [ -z "$ISO_URL" ]; then
-            required=(--require default.xex,default_mp.xex)
+          # Whatever the links were, both executables have to be there
+          # afterwards -- unless a disc image was given, which build.sh
+          # takes them out of itself.
+          required=(--require default.xex,default_mp.xex)
+          if [ -n "$ISO_URL" ]; then
+            required=()
           fi
           python3 tools/fetch_asset.py --into mw2 --github-output "${required[@]}" "${links[@]}"
 

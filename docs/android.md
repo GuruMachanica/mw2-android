@@ -73,11 +73,27 @@ It asks for:
 
 | | |
 | --- | --- |
-| **Link to default.xex** | Google Drive, a Hugging Face repository, or any direct URL |
-| **Link to default_mp.xex** | both are needed whichever app you build: the installer checks a player's copy against each, so the build has to know both hashes |
-| **Link to the disc image** | instead of the two, if you would rather hand over the whole thing. Large -- Hugging Face serves it, Drive generally refuses |
+| **Link to one zip** | the simplest way: both executables in a single archive. Fill this in and leave the rest empty |
+| **Link to default.xex** | if you would rather not zip them |
+| **Link to default_mp.xex** | both executables are needed whichever app you build: the installer checks a player's copy against each, so the build has to know both hashes |
+| **Link to the disc image** | instead of either, if you would rather hand over the whole thing. Large -- Hugging Face serves it, Drive generally refuses |
 | **Which app** | campaign, multiplayer, or both |
 | **How hard the compiler works** | `-O2` by default. `-O3` is a few percent quicker to run and a good deal slower to build, which matters when a job is given six hours |
+
+### One zip with both executables
+
+Zip them however you like -- loose, or in a folder inside the archive, under
+whatever names -- upload it, and give the link. The archive is unpacked and
+each file inside is looked at in turn.
+
+Which of the two is which is decided by the executables themselves, not by
+their file names: a XEX carries the name it was built under, and the
+multiplayer one says so. `1.xex` and `2.xex` land the right way round. Only
+if that header is missing from both does the order in the archive decide it,
+and the log says plainly that it had to guess -- name them `default.xex` and
+`default_mp.xex` in that case and there is nothing left to guess at.
+
+7z works as well as zip. An archive holding the whole disc image works too.
 
 A link typed into the form is written into the run's record, where anyone who
 can read this repository's Actions can see it. To keep it out of there, put
@@ -86,7 +102,8 @@ form empty:
 
 | Secret | For |
 | --- | --- |
-| `DEFAULT_XEX_URL`, `DEFAULT_MP_XEX_URL` | the two executables |
+| `GAME_ARCHIVE_URL` | one zip with both executables in it |
+| `DEFAULT_XEX_URL`, `DEFAULT_MP_XEX_URL` | the two executables separately |
 | `ISO_URL` | the disc image, if you use one instead |
 | `HF_TOKEN` | a private Hugging Face repository |
 | `KEYSTORE_BASE64`, `KEYSTORE_PASSWORD`, `KEY_ALIAS`, `KEY_PASSWORD` | signing with your own key. Without them the debug key signs it, which installs perfectly well and is honest about what it is |
@@ -113,8 +130,13 @@ such limit.
 The same script works by hand:
 
 ```sh
+# one archive with both in it
+python3 tools/fetch_asset.py --into mw2 "https://.../mw2-executables.zip"
+
+# or the two of them named
 python3 tools/fetch_asset.py --into mw2 \
   "default.xex=https://..." "default_mp.xex=https://..."
+
 TITLE=sp ./build.sh
 ```
 

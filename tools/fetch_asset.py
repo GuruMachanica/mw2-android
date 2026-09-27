@@ -308,12 +308,59 @@ def sha256_of(path):
     return digest.hexdigest()
 
 
-def executable_name(hint):
-    """default.xex or default_mp.xex, from whatever the file was called."""
-    lowered = os.path.basename(hint).lower()
-    if re.search(r"(^|[^a-z])mp([^a-z]|$)|multiplayer|_mp\.", lowered):
-        return "default_mp.xex"
-    return "default.xex"
+MP_IN_NAME = re.compile(r"(^|[^a-z])mp([^a-z]|$)|multiplayer")
+
+
+def xex_original_name(path):
+    """The name the executable was built under, out of its own header.
+
+    A XEX2 carries the file name it was linked as (the ORIGINAL_PE_NAME
+    optional header). That is what tells the disc's two executables apart
+    when the names they arrive under do not -- a zip whose members are
+    called 1.xex and 2.xex, say. Returns None when the header is not there
+    or the file is not one.
+    """
+    try:
+        with open(path, "rb") as handle:
+            head = handle.read(1 << 20)
+        if head[:4] != b"XEX2" or len(head) < 24:
+            return None
+        import struct
+        count = struct.unpack_from(">I", head, 20)[0]
+        if count > 512:
+            return None
+        for i in range(count):
+            key, value = struct.unpack_from(">II", head, 24 + i * 8)
+            if key != 0x000183FF:
+                continue
+            # Not an inline value: an offset to a length-prefixed string.
+            if value + 8 > len(head):
+                return None
+            size = struct.unpack_from(">I", head, value)[0]
+            if not 4 < size <= 256 or value + size > len(head):
+                return None
+            text = head[value + 4:value + size].split(b"\0")[0]
+            return text.decode("latin-1").strip() or None
+    except (OSError, struct.error, IndexError):
+        return None
+    return None
+
+
+def executable_name(hint, path=None):
+    """default.xex or default_mp.xex.
+
+    The executable's own idea of its name comes first, because it is the
+    only one that cannot be wrong; the name it arrived under is the fallback.
+    """
+    if path:
+        built_as = xex_original_name(path)
+        if built_as:
+            stem = os.path.splitext(os.path.basename(built_as))[0].lower()
+            if MP_IN_NAME.search(stem):
+                return "default_mp.xex"
+            if stem:
+                return "default.xex"
+    return "default_mp.xex" if MP_IN_NAME.search(os.path.basename(hint).lower()) else "default.xex"
 
 
 def place(path, name, into_directory, placed):
@@ -356,14 +403,32 @@ def unpack_archive(path, into_directory, wanted_name, placed):
             return False
 
         os.unlink(path)
-        found = 0
+
+        # Everything in the archive that this build has a use for.
+        candidates = []
         for root, _, names in os.walk(unpacked):
             for name in sorted(names):
                 inside = os.path.join(root, name)
-                if identify_and_place(inside, name, into_directory, placed, wanted_name):
-                    found += 1
-        if not found:
+                head = first_bytes(inside, 6)
+                if head[:4] == b"XEX2" or is_disc_image(inside) or \
+                        head[:4] == b"PK\x03\x04" or head == b"7z\xbc\xaf\x27\x1c":
+                    candidates.append((inside, name))
+
+        if not candidates:
             say("    nothing in the archive was an executable or a disc image")
+            return True
+
+        # A name asked for on the command line belongs to the file, not to
+        # the archive it travelled in: it only applies when there is one
+        # file to apply it to. An archive holding both executables names
+        # them itself -- from what each was built as, if their file names
+        # do not say (executable_name).
+        single = wanted_name if len(candidates) == 1 else None
+        say(f"    {len(candidates)} file(s) inside")
+        found = 0
+        for inside, name in candidates:
+            if identify_and_place(inside, name, into_directory, placed, single):
+                found += 1
         return True
     finally:
         shutil.rmtree(unpacked, ignore_errors=True)
@@ -374,8 +439,26 @@ def identify_and_place(path, hint, into_directory, placed, wanted_name=None):
     head = first_bytes(path, 6)
 
     if head[:4] == b"XEX2":
-        name = wanted_name or executable_name(hint)
-        say(f"    an Xbox 360 executable ({hint})")
+        name = wanted_name or executable_name(hint, path)
+        built_as = xex_original_name(path)
+        say(f"    an Xbox 360 executable ({hint}"
+            f"{', built as ' + built_as if built_as else ''})")
+        if name in placed:
+            # Two of them wanting the same slot: the second takes the other
+            # one, if it is free. That happens when neither the file names
+            # nor the headers distinguish them, which for this disc's two
+            # executables they do -- so it is worth saying out loud.
+            other = "default_mp.xex" if name == "default.xex" else "default.xex"
+            if other in placed:
+                raise SystemExit(
+                    f"    Both names are already taken and {hint} is a third "
+                    f"executable. Send just the two: default.xex and default_mp.xex."
+                )
+            say(f"    !! {name} is taken already, and nothing in this file says "
+                f"which it is; keeping it as {other}.")
+            say("       If that is the wrong way round, name the two files "
+                "default.xex and default_mp.xex inside the archive.")
+            name = other
         place(path, name, into_directory, placed)
         return True
 
