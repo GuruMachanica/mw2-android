@@ -198,7 +198,20 @@ namespace
 
         VkApplicationInfo app{ VK_STRUCTURE_TYPE_APPLICATION_INFO };
         app.pApplicationName = "mw2recomp";
+        // The highest the loader will admit to, capped at 1.3. It matters:
+        // dynamic rendering and extended dynamic state are core there, and
+        // a driver that has them in core rather than as extensions can only
+        // be asked for them by an application that says it targets 1.3.
         app.apiVersion = VK_API_VERSION_1_2;
+        if (vkEnumerateInstanceVersion)
+        {
+            uint32_t available = 0;
+            if (vkEnumerateInstanceVersion(&available) == VK_SUCCESS &&
+                available >= VK_API_VERSION_1_3)
+            {
+                app.apiVersion = VK_API_VERSION_1_3;
+            }
+        }
 
         VkDebugUtilsMessengerCreateInfoEXT messenger{
             VK_STRUCTURE_TYPE_DEBUG_UTILS_MESSENGER_CREATE_INFO_EXT };

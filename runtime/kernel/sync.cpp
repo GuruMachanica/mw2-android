@@ -13,6 +13,7 @@
 #include "../atomic_ref.h"
 
 #include <atomic>
+#include <cstring>
 #include <mutex>
 #include <thread>
 #include <algorithm>
@@ -30,30 +31,88 @@ namespace
         return *GuestPtr<be32>(ctx.r13.u32 + kCurrentThreadOffset);
     }
 
-    // A big-endian guest word, changed atomically. mw2::AtomicRef is
-    // std::atomic_ref where the library has it and the compiler's builtins
-    // where it does not -- the NDK's libc++ 18 does not (runtime/atomic_ref.h).
-    mw2::AtomicRef<uint32_t> Word(uint32_t address)
+    // A big-endian guest word, changed atomically.
+    //
+    // The word is usually aligned, because the title's own structures are,
+    // and then this is one instruction. It is not always: a title reaches
+    // RtlEnterCriticalSection with a pointer that is off, and the console
+    // would have raised an alignment exception where an x86 host quietly
+    // does the unaligned atomic and carries on. An arm64 host does neither:
+    // ldaxr on an unaligned address is a SIGBUS, and a run that would have
+    // limped past the bad pointer everywhere else dies here instead.
+    //
+    // So the aligned case is the hardware's and the unaligned case is a
+    // lock's. The result is what x86 gives -- the operation happens, on that
+    // memory, atomically against other guest threads -- without the crash.
+    std::mutex& UnalignedLock()
     {
-        return mw2::AtomicRef<uint32_t>(*reinterpret_cast<uint32_t*>(guest::Base() + address));
+        static std::mutex lock;
+        return lock;
+    }
+
+    bool Aligned(uint32_t address) { return (address & 3u) == 0; }
+
+    // Said once, because a title that does this does it constantly, and the
+    // address is the thing worth knowing: below the first 64 KB it is not a
+    // pointer at all but something uninitialised being used as one.
+    void NoteUnaligned(uint32_t address)
+    {
+        static std::atomic<bool> said{ false };
+        if (said.exchange(true, std::memory_order_relaxed)) return;
+        LOGW("sync: an interlocked word at guest %08X is not 4-byte aligned%s;"
+             " handled under a lock, as an x86 host would", address,
+             address < 0x10000 ? " and is not a plausible pointer either" : "");
+    }
+
+    uint32_t LoadWord(uint32_t address)
+    {
+        uint32_t* const word = reinterpret_cast<uint32_t*>(guest::Base() + address);
+        if (Aligned(address)) return mw2::AtomicRef<uint32_t>(*word).load();
+        NoteUnaligned(address);
+        std::lock_guard held(UnalignedLock());
+        uint32_t value;
+        std::memcpy(&value, word, sizeof value);
+        return value;
+    }
+
+    void StoreWord(uint32_t address, uint32_t value)
+    {
+        uint32_t* const word = reinterpret_cast<uint32_t*>(guest::Base() + address);
+        if (Aligned(address)) { mw2::AtomicRef<uint32_t>(*word).store(value); return; }
+        NoteUnaligned(address);
+        std::lock_guard held(UnalignedLock());
+        std::memcpy(word, &value, sizeof value);
+    }
+
+    bool CompareExchangeWord(uint32_t address, uint32_t& expected, uint32_t desired)
+    {
+        uint32_t* const word = reinterpret_cast<uint32_t*>(guest::Base() + address);
+        if (Aligned(address))
+            return mw2::AtomicRef<uint32_t>(*word).compare_exchange_strong(expected, desired);
+        NoteUnaligned(address);
+        std::lock_guard held(UnalignedLock());
+        uint32_t seen;
+        std::memcpy(&seen, word, sizeof seen);
+        if (seen != expected) { expected = seen; return false; }
+        std::memcpy(word, &desired, sizeof desired);
+        return true;
     }
 
     // Adds and returns the new value, as InterlockedIncrement does.
     int32_t Add(uint32_t address, int32_t delta)
     {
-        auto word = Word(address);
-        uint32_t old = word.load();
+        uint32_t old = LoadWord(address);
         for (;;)
         {
             const int32_t value = int32_t(__builtin_bswap32(old)) + delta;
-            if (word.compare_exchange_weak(old, __builtin_bswap32(uint32_t(value)))) return value;
+            if (CompareExchangeWord(address, old, __builtin_bswap32(uint32_t(value)))) return value;
         }
     }
 
     bool CompareExchange(uint32_t address, uint32_t expected, uint32_t desired)
     {
         uint32_t old = __builtin_bswap32(expected);
-        return Word(address).compare_exchange_strong(old, __builtin_bswap32(desired));
+        return CompareExchangeWord(address, old, __builtin_bswap32(desired));
     }
 
     void Initialise(uint32_t cs, uint32_t spinCount)
@@ -186,9 +245,9 @@ PPC_FUNC(__imp__KfAcquireSpinLock)
     ctx.r3.u64 = 0;   // the previous IRQL
 }
 
-PPC_FUNC(__imp__KfReleaseSpinLock)              { Word(ctx.r3.u32).store(0); }
+PPC_FUNC(__imp__KfReleaseSpinLock)              { StoreWord(ctx.r3.u32, 0); }
 PPC_FUNC(__imp__KeAcquireSpinLockAtRaisedIrql)  { AcquireSpinLock(ctx.r3.u32, ctx.r13.u32); }
-PPC_FUNC(__imp__KeReleaseSpinLockFromRaisedIrql){ Word(ctx.r3.u32).store(0); }
+PPC_FUNC(__imp__KeReleaseSpinLockFromRaisedIrql){ StoreWord(ctx.r3.u32, 0); }
 PPC_FUNC(__imp__KeTryToAcquireSpinLockAtRaisedIrql)
 {
     ctx.r3.u64 = CompareExchange(ctx.r3.u32, 0, ctx.r13.u32) ? 1 : 0;

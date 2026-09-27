@@ -213,20 +213,48 @@ bool vk::pipeline::CreateDevice(void* physicalDevice, uint32_t family,
         query.pNext = &dynamicRendering;
         vkGetPhysicalDeviceFeatures2(physical, &query);
     }
+    // Both of these were extensions once and are core in Vulkan 1.3, and a
+    // driver that has them in core is under no obligation to still list them
+    // as extensions -- most phone drivers do not. Asking only for the
+    // extension string turned a perfectly capable device away, which is what
+    // happened on an Adreno 710: the feature bits were set, the strings were
+    // absent, and the renderer went headless.
+    //
+    // So the feature is what is asked about; the extension name is only
+    // added to the device when it really is one, because naming an extension
+    // the driver does not have is itself an error.
+    VkPhysicalDeviceProperties deviceProperties{};
+    vkGetPhysicalDeviceProperties(physical, &deviceProperties);
+    const bool core13 = deviceProperties.apiVersion >= VK_API_VERSION_1_3;
+
+    const bool dynamicRenderingExtension =
+        DeviceHasExtension(physical, VK_KHR_DYNAMIC_RENDERING_EXTENSION_NAME);
+    const bool dynamicStateExtension =
+        DeviceHasExtension(physical, VK_EXT_EXTENDED_DYNAMIC_STATE_EXTENSION_NAME);
     const bool hasDynamicRendering =
-        DeviceHasExtension(physical, VK_KHR_DYNAMIC_RENDERING_EXTENSION_NAME) &&
-        dynamicRendering.dynamicRendering;
+        dynamicRendering.dynamicRendering && (dynamicRenderingExtension || core13);
     const bool hasDynamicState =
-        DeviceHasExtension(physical, VK_EXT_EXTENDED_DYNAMIC_STATE_EXTENSION_NAME) &&
-        dynamicState.extendedDynamicState;
+        dynamicState.extendedDynamicState && (dynamicStateExtension || core13);
+
+    LOGI("vulkan: device reports Vulkan %u.%u.%u; dynamic rendering %s (extension %s),"
+         " extended dynamic state %s (extension %s)",
+         VK_VERSION_MAJOR(deviceProperties.apiVersion),
+         VK_VERSION_MINOR(deviceProperties.apiVersion),
+         VK_VERSION_PATCH(deviceProperties.apiVersion),
+         dynamicRendering.dynamicRendering ? "yes" : "no",
+         dynamicRenderingExtension ? "yes" : "no",
+         dynamicState.extendedDynamicState ? "yes" : "no",
+         dynamicStateExtension ? "yes" : "no");
+
     if (!hasDynamicRendering || !hasDynamicState)
     {
-        LOGW("vulkan: the device lacks dynamic rendering or extended dynamic state, which the"
-             " renderer needs");
+        LOGW("vulkan: the device lacks %s, which the renderer needs",
+             !hasDynamicRendering && !hasDynamicState ? "dynamic rendering and extended dynamic state"
+             : !hasDynamicRendering ? "dynamic rendering" : "extended dynamic state");
         return false;
     }
-    extensions.push_back(VK_KHR_DYNAMIC_RENDERING_EXTENSION_NAME);
-    extensions.push_back(VK_EXT_EXTENDED_DYNAMIC_STATE_EXTENSION_NAME);
+    if (dynamicRenderingExtension) extensions.push_back(VK_KHR_DYNAMIC_RENDERING_EXTENSION_NAME);
+    if (dynamicStateExtension) extensions.push_back(VK_EXT_EXTENDED_DYNAMIC_STATE_EXTENSION_NAME);
     g.pipelineLibraries =
         DeviceHasExtension(physical, VK_KHR_PIPELINE_LIBRARY_EXTENSION_NAME) &&
         DeviceHasExtension(physical, VK_EXT_GRAPHICS_PIPELINE_LIBRARY_EXTENSION_NAME) &&
@@ -284,7 +312,20 @@ namespace
         // 1.1 for negative viewport heights, which is how the renderer expresses the
         // console's +Y-up clip space; 1.2 for the render pass depth resolve the
         // multisampled surfaces need.
+        // The highest the loader will admit to, capped at 1.3. It matters:
+        // dynamic rendering and extended dynamic state are core there, and
+        // a driver that has them in core rather than as extensions can only
+        // be asked for them by an application that says it targets 1.3.
         app.apiVersion = VK_API_VERSION_1_2;
+        if (vkEnumerateInstanceVersion)
+        {
+            uint32_t available = 0;
+            if (vkEnumerateInstanceVersion(&available) == VK_SUCCESS &&
+                available >= VK_API_VERSION_1_3)
+            {
+                app.apiVersion = VK_API_VERSION_1_3;
+            }
+        }
 
         VkInstanceCreateInfo info{ VK_STRUCTURE_TYPE_INSTANCE_CREATE_INFO };
         info.pApplicationInfo = &app;
