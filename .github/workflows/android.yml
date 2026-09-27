@@ -58,10 +58,10 @@ on:
         type: choice
         options: ["-O2", "-O1", "-O3"]
         default: "-O2"
-      draft_release:
-        description: "Also draft a GitHub release with the apk"
+      publish:
+        description: "Publish the apk as a release (a direct, resumable download -- artifacts come as a zip and truncate on phones)"
         type: boolean
-        default: false
+        default: true
 
 permissions:
   contents: write
@@ -388,12 +388,41 @@ jobs:
             echo "the first time you start it."
           } >> "$GITHUB_STEP_SUMMARY"
 
-      - name: Draft a release
-        if: ${{ inputs.draft_release }}
+      # An artifact arrives as a zip that has to be unpacked on the phone, is
+      # not resumable, and gives no warning when it stops early -- which for
+      # a few hundred megabytes over a phone connection is how most of them
+      # end. Android then says the package cannot be parsed, which sounds
+      # like a bad build and is not. A release asset is the apk itself:
+      # downloaded directly, resumable, with the size shown by the browser.
+      - name: Publish the apk
+        if: ${{ inputs.publish }}
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
+          set -euo pipefail
           tag="android-$(date -u +%Y%m%d-%H%M)"
-          gh release create "$tag" dist/* --repo "$GITHUB_REPOSITORY" --draft \
-            --title "Android ${{ inputs.title }} ($tag)" \
-            --notes "arm64 only. No game data: the app installs from your own copy of the disc. See docs/android.md."
+          {
+            echo "arm64 only. The app carries no game data: it installs from your own copy."
+            echo
+            echo "**Download the .apk below directly** -- not the source zips, and not the"
+            echo "run's artifact. The artifact is a zip and truncates on phones; this does not."
+            echo
+            echo '```'
+            cat dist/SHA256SUMS.txt
+            echo '```'
+            echo
+            echo "| file | size |"
+            echo "|---|---|"
+            for apk in dist/*.apk; do
+              echo "| $(basename "$apk") | $(stat -c%s "$apk") bytes ($(du -h "$apk" | cut -f1)) |"
+            done
+            echo
+            echo "If Android says the package cannot be parsed, the file is short:"
+            echo "check its size against the table above and download it again."
+          } > notes.md
+          gh release create "$tag" dist/*.apk dist/SHA256SUMS.txt \
+            --repo "$GITHUB_REPOSITORY" \
+            --title "Android ${{ inputs.title }} ($tag)" --notes-file notes.md
+          echo "### Download" >> "$GITHUB_STEP_SUMMARY"
+          echo "" >> "$GITHUB_STEP_SUMMARY"
+          echo "$(gh release view "$tag" --repo "$GITHUB_REPOSITORY" --json url -q .url)" >> "$GITHUB_STEP_SUMMARY"
