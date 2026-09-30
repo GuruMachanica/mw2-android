@@ -21,6 +21,12 @@ savevmx_14_address   = 0x823DF3A0
 restvmx_64_address   = 0x823DF6CC
 savevmx_64_address   = 0x823DF434
 
+# The C runtime's setjmp and longjmp. Com_Error leaves an error with longjmp to
+# the setjmp of the thread's frame loop; recompiled as ordinary functions, the
+# longjmp returned into the code that raised the error instead.
+setjmp_address  = 0x823DFF10
+longjmp_address = 0x823E08C0
+
 # Compact "bdzf ladder" dispatch that XenonAnalyse splits into 5 separate
 # functions; the fallthrough targets 0x8232D874/890/8AC are internal labels,
 # not entry points. Real extent: 0x8232D830 .. 0x8232D8C8 (blr) = 0x9C bytes.

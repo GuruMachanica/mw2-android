@@ -192,6 +192,22 @@ keeps the scalar and vector float modes in separate registers, x86 has one,
 and the recompiled code tracks which mode it last set, so a callee that leaves
 flush-to-zero on would make the caller's scalar code flush from then on.
 
+### setjmp and longjmp
+
+`Com_Error` leaves an error with the CRT's `longjmp` to the `setjmp` in the
+thread's frame loop (the main loop, the renderer, the workers each have one).
+Both recompiler configs name the pair (`setjmp_address`, `longjmp_address`), so
+the recompiler emits host `setjmp`/`longjmp` there, saving the guest registers
+at the `setjmp` and restoring them when the `longjmp` lands. Recompiled as
+ordinary functions, the `longjmp` would return into the code that raised the
+error, which carries on in a state the title never expects: a client dropped at
+the end of a match hung in its error cleanup.
+
+A host `longjmp` skips every host frame between the two, destructors included.
+Runtime code that calls back into guest code -- a hook's `GUEST_ORIG`, an APC,
+the scripted console -- must not hold a lock or an owning object across the
+call.
+
 ## Threads
 
 Each guest thread is a detached host thread with its own guest stack (at least

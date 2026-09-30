@@ -27,8 +27,8 @@ environment variable (`tools/title.py`), which reads the PE section table from
 the image because the two executables lay their sections out differently.
 
 `config/MW2MP.toml` has its own `[main]` block: the multiplayer's addresses of
-the register save/restore helpers, and its own list of jump-table functions
-(`tools/fixbounds.py`).
+the register save/restore helpers and of `setjmp`/`longjmp`, and its own list
+of jump-table functions (`tools/fixbounds.py`).
 
 ### `runtime/title.h`
 

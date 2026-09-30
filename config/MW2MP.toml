@@ -23,6 +23,12 @@ savevmx_14_address   = 0x8241ACE0
 restvmx_64_address   = 0x8241B00C
 savevmx_64_address   = 0x8241AD74
 
+# The C runtime's setjmp and longjmp. Com_Error leaves an error with longjmp to
+# the setjmp of the thread's frame loop; recompiled as ordinary functions, the
+# longjmp returned into the code that raised the error instead.
+setjmp_address  = 0x8241B630
+longjmp_address = 0x8241C390
+
 # Leaf functions (no stack frame, hence absent from .pdata) that contain jump
 # tables. The analyzer ends them early because a table dispatch looks like a
 # tail call. Extents derived by tools/fixbounds.py (MW2_TITLE=mp) from bl
