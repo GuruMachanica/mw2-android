@@ -67,11 +67,13 @@ if [ ! -f mw2/default.xex ] || [ ! -f mw2/default_mp.xex ]; then
     python3 tools/xdvdfs.py "$ISO" mw2 default.xex default_mp.xex
 fi
 
-# Every fastfile on the disc, ~5.7 GB with the .pak archives beside them. A
+# Every fastfile on the disc, ~5.9 GB with the .pak archives beside them. A
 # missing one is not a missing level: the title asks for the zone, is told the
 # file is not there, reports a dirty disc and then falls over. Extracting the
 # ones a particular map needs means knowing them in advance, which nothing does
-# -- the multiplayer picks its own map. Files already there are left alone.
+# -- the multiplayer picks its own map. The Bink movies come too (~1.3 GB): the
+# logos, and each level's briefing, which plays while it loads. Files already
+# there are left alone.
 mkdir -p mw2/game
 if [ ! -f "$ISO" ]; then
     echo "    no ISO: building without the game data"
@@ -83,7 +85,7 @@ from xdvdfs import XDvdFs
 fs = XDvdFs(sys.argv[1])
 have = set(os.listdir("mw2/game"))
 missing = [(n, sec, size) for n, sec, size, attr, isdir in sorted(fs.walk())
-           if not isdir and n.endswith((".ff", ".pak")) and n not in have]
+           if not isdir and n.endswith((".ff", ".pak", ".bik")) and n not in have]
 if missing:
     print("    extracting %d files, %.2f GB" % (len(missing), sum(s for _, _, s in missing) / 1e9))
 for n, sec, size in missing:

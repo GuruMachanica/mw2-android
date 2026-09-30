@@ -28,7 +28,8 @@ Everything under version control is hand-written or a patch.
    is);
 2. builds XenonRecomp and XenonAnalyse;
 3. extracts `default.xex` and `default_mp.xex` from the ISO into `mw2/`, and
-   every `.ff` and `.pak` into `mw2/game/` (files already there are kept);
+   every `.ff`, `.pak` and `.bik` into `mw2/game/` (files already there are
+   kept);
 4. writes the flat PE image (`mw2/default.pe` or `mw2/default_mp.pe`) with
    `tools/xexdump.py`;
 5. finds jump tables with XenonAnalyse (`config/mw2_switch_tables.toml`,

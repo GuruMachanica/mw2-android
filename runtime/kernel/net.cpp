@@ -284,6 +284,12 @@ PPC_FUNC(__imp__NetDll_WSAGetLastError) { ctx.r3.u64 = t_lastError; }
 // untouched makes it report the nonsense it found there and restart itself.
 PPC_FUNC(__imp__NetDll_WSAStartup)
 {
+#ifdef _WIN32
+    // The host's Winsock too: without an online service the sockets below are
+    // real ones, and every call fails until it is started.
+    static const bool started = [] { WSADATA wsa; return WSAStartup(MAKEWORD(2, 2), &wsa) == 0; }();
+    if (!started) { ctx.r3.u64 = X_WSAENETDOWN; return; }
+#endif
     uint16_t requested = uint16_t(ctx.r4.u32);
     if (auto* data = GuestPtr<uint8_t>(ctx.r5.u32))
     {

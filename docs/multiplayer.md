@@ -71,8 +71,8 @@ A unique match of a different size needs reading before it is trusted.
 **Every fastfile.** The campaign loads the level it is told to; the multiplayer
 chooses its own map and zones. A zone whose file is missing makes the title
 report a dirty disc and fail, so `build.sh` and the installer extract every
-`.ff` and `.pak` on the disc (about 5.7 GB). Bink movies are left out; see
-[gameplay.md](gameplay.md).
+`.ff` and `.pak` on the disc (about 5.9 GB), and the campaign's Bink movies
+beside them ([gameplay.md](gameplay.md#movies)); the multiplayer plays none.
 
 **A network link.** The multiplayer refuses to start any match without one, and
 a system-link match is how it reaches a map. `XNetGetEthernetLinkStatus`

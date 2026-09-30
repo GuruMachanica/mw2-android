@@ -18,7 +18,7 @@ files are included; you need your own disc.
 - Xbox 360-style controller, with rumble
 
 Not supported: public matchmaking and ranked playlists (they needed
-Activision's servers), cutscene and loading movies. Special Ops is untested.
+Activision's servers). Special Ops is untested.
 
 ## Requirements
 
@@ -26,7 +26,7 @@ Activision's servers), cutscene and loading movies. Special Ops is untested.
   updates can't be used). The installer checks it.
 - Linux or Windows, 64-bit
 - A Vulkan 1.2 GPU
-- 6 GB of disk space
+- 8 GB of disk space
 - A controller (the keyboard only covers the menus)
 
 ## Install

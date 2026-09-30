@@ -83,12 +83,12 @@ physical heap, since everything the GPU is handed comes from there.
 - **A player's start** (no arguments, or `--install <iso or folder>`): the
   executable works from its own folder. If `game/<xex>` is missing it asks for
   the disc image in the desktop's file dialog (or takes the one given to
-  `--install`) and copies the fastfiles (`.ff`), the image archives (`.pak`) and
-  both executables into `game/`, executables last, so an executable present
-  means a finished install. It then reads `game/default.xex` or
-  `game/default_mp.xex`, refuses it unless its SHA-256 matches the one CMake
-  baked in from `mw2/` (another region or a title update has other code at
-  other addresses), and decrypts and decompresses the XEX2 in memory at every
+  `--install`) and copies the fastfiles (`.ff`), the image archives (`.pak`),
+  the movies (`.bik`) and both executables into `game/`, executables last, so
+  an executable present means a finished install. It then reads
+  `game/default.xex` or `game/default_mp.xex`, refuses it unless its SHA-256
+  matches the one CMake baked in from `mw2/` (another region or a title update
+  has other code at other addresses), and decrypts and decompresses the XEX2 in memory at every
   launch (`install/xex.cpp`, `install/crypto.cpp`).
 - **A development run** names the image and the game folder:
   `./build/mw2 mw2/default.pe mw2/game`. The image may be the flat PE that

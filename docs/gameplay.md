@@ -11,17 +11,29 @@ onto that one flat directory.
 
 | files | status |
 |---|---|
-| `.ff` fastfiles, `.pak` image archives | all of them are extracted, by `build.sh` from the ISO or by the installer (`runtime/install/`) |
-| `.bik` Bink movies (logos, boot movie, per-level loading movies) | left out |
+| `.ff` fastfiles, `.pak` image archives, `.bik` Bink movies | all of them are extracted, by `build.sh` from the ISO or by the installer (`runtime/install/`) |
 
 Every fastfile is needed, not only the current level's: a zone whose file is
 missing makes the title report a dirty disc and fail, and the multiplayer picks
 its own zones.
 
-The Bink movies are left out because nothing decodes Bink, and a level load
-waits for a playing movie to finish; with a movie present the load never
-completes. With the files absent the title reports them missing, skips them,
-and a loading screen has a black backdrop.
+## Movies
+
+Bink is linked into the title (its own `BINK` section) and decodes on the CPU,
+on two threads of its own per movie, and its sound reaches the output with the
+rest of the title's. Nothing in the runtime is specific to it.
+
+The campaign plays `IW_logo` and `legal` at boot, and a level's briefing while
+the level loads: `video/cin_levels.txt` in `common.ff` names it, `<map>_load`.
+When the load finishes, `UI_SetActiveMenu` opens the `pregame` menu, whose item
+`press_to_skip` runs `uiScript playerstart` on A, and the level starts; it also
+starts when the briefing ends. With `ui_autoContinue` set it starts as soon as
+the load finishes, which a scripted run wants:
+
+    MW2_CONSOLE="1:set ui_autoContinue 1;2:map trainer"
+
+With a movie's file missing the title logs it, skips it, and the level starts
+when it is loaded.
 
 ## Loading a level from the command line
 

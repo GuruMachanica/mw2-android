@@ -89,9 +89,8 @@ namespace
             const size_t n = std::strlen(suffix);
             return lower.size() >= n && lower.compare(lower.size() - n, n, suffix) == 0;
         };
-        // The fastfiles and the image archives. The Bink movies are left out:
-        // nothing decodes them, and a level load waits forever on one playing.
-        return endsWith(".ff") || endsWith(".pak");
+        // The fastfiles, the image archives and the Bink movies.
+        return endsWith(".ff") || endsWith(".pak") || endsWith(".bik");
     }
 
     struct Progress
