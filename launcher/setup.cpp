@@ -32,12 +32,13 @@ namespace
     constexpr const char* kGameFolder = "game";
 
 #ifndef MW2_VERSION_TU0
-    // Title update 6, as the codxe project's repository carries it, at a
-    // commit of ours choosing so the file cannot change under the checksum.
+    // Title update 6, from the CoD Xenon project's archive of title updates
+    // (its maintainer's suggestion), at a commit of our choosing so the file
+    // cannot change under the checksum.
     constexpr const char* kUpdateName = "TU_10LC20N_0000018000000.00000000001GA";
     constexpr const char* kUpdateUrl =
-        "https://raw.githubusercontent.com/michaeloliverx/codxe/e68e08d123a9647a9a1bb5bcce2590270e81484c/"
-        "resources/iw4/Title%20Updates/TU6/TU_10LC20N_0000018000000.00000000001GA";
+        "https://raw.githubusercontent.com/codxenon/xbox360-title-updates/25de2389ce214dae6159fcd45a9581cb3b640bd9/"
+        "games/Call%20of%20Duty%20-%20Modern%20Warfare%202%20%28USA%2C%20Europe%29/TU6/TU_10LC20N_0000018000000.00000000001GA";
     // The fastfiles it adds, which go beside the disc's.
     struct Added { const char* name; const char* sha256; };
     constexpr Added kAdded[] = {

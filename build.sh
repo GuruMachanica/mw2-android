@@ -6,6 +6,8 @@
 #   build/; TITLE=mp builds default_mp.xex, the multiplayer, into build-mp/.
 #   The two share the runtime and nothing else: each has its own recompiled
 #   tree (ppc/, ppc_mp/), switch tables and build directory.
+#   RELEASE_TAG=<tag> is the release the build is published as (v0.3.0): the
+#   launcher looks for a newer one than it. Without it the launcher does not.
 #   RELEASE=1 builds without diagnostics (runtime/diagnostics.h) into
 #   build-release/ or build-mp-release/.
 #   ONLINE=none|lan|steam picks the online service (runtime/online/); none, the
@@ -174,7 +176,7 @@ if [ "$BUILD" != build ]; then
     [ -d build/_deps/ffmpeg_xma-src ] && FETCHED="$FETCHED -DFETCHCONTENT_SOURCE_DIR_FFMPEG_XMA=$ROOT/build/_deps/ffmpeg_xma-src"
     [ -d build/_deps/imgui-src ]      && FETCHED="$FETCHED -DFETCHCONTENT_SOURCE_DIR_IMGUI=$ROOT/build/_deps/imgui-src"
 fi
-cmake -B $BUILD -G Ninja -DCMAKE_BUILD_TYPE=Release -DMW2_TITLE=$TITLE -DMW2_VERSION=$VERSION -DMW2_DIAGNOSTICS=$DIAGNOSTICS -DMW2_ONLINE=${ONLINE:-none} -DMW2_PORTABLE=$PORTABLE $FETCHED $CMAKE_EXTRA \
+cmake -B $BUILD -G Ninja -DCMAKE_BUILD_TYPE=Release -DMW2_TITLE=$TITLE -DMW2_VERSION=$VERSION -DMW2_DIAGNOSTICS=$DIAGNOSTICS -DMW2_ONLINE=${ONLINE:-none} -DMW2_PORTABLE=$PORTABLE -DMW2_RELEASE_TAG=${RELEASE_TAG:-} $FETCHED $CMAKE_EXTRA \
       $TOOLCHAIN >/dev/null
 cmake --build $BUILD -j"$(nproc)"
 ls -la $BUILD/$EXE

@@ -42,6 +42,10 @@ From a terminal: `./mw2-launcher --install path/to/game.iso` (an extracted
 disc folder works too). If the update can't be downloaded, the launcher says
 where to get it and takes the file (`--update <file>`).
 
+The launcher also has PROFILE (set the multiplayer rank and prestige, unlock
+everything, open the campaign's and Special Ops' missions) and CHECK FOR
+UPDATES, which installs a newer release over this one.
+
 Saves go in `saves/` beside the executables.
 
 ## Play

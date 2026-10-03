@@ -5,16 +5,20 @@
 //     mw2-launcher                                  the window
 //     mw2-launcher --install [<disc>] [--update <package or folder>]
 //                                                   the install, in a terminal
+//     mw2-launcher --upgrade                        a newer release, in a terminal
 //
 // With no <disc>, --install brings the install already in game/ up to date.
 #include "disc.h"
 #include "fonts.h"
+#include "profile.h"
 #include "setup.h"
 #include "ui.h"
+#include "update.h"
 
 #ifdef _WIN32
 #include <windows.h>
 #include <shellapi.h>
+#include <tlhelp32.h>
 #endif
 #include <SDL3/SDL.h>
 #include <imgui.h>
@@ -26,6 +30,7 @@
 #include <chrono>
 #include <cstdio>
 #include <cstring>
+#include <functional>
 #include <memory>
 #include <mutex>
 #include <string>
@@ -42,14 +47,19 @@ namespace
 #ifdef _WIN32
     constexpr const char* kCampaign = "mw2-sp.exe";
     constexpr const char* kMultiplayer = "mw2-mp.exe";
+    constexpr const char* kLauncher = "mw2-launcher.exe";
 #else
     constexpr const char* kCampaign = "mw2-sp";
     constexpr const char* kMultiplayer = "mw2-mp";
+    constexpr const char* kLauncher = "mw2-launcher";
 #endif
 
-    // An install running on its own thread.
+    // An install running on its own thread, or with `work` given, a look for
+    // a newer version of the launcher or its installation.
     struct Job
     {
+        enum class Kind { Install, CheckUpdate, InstallUpdate } kind = Kind::Install;
+        std::function<setup::Result(setup::Progress&, std::string&)> work;
         fs::path disc, update;
         setup::Progress progress;
         std::atomic<bool> finished{ false };
@@ -59,7 +69,10 @@ namespace
 
         void Start()
         {
-            thread = std::thread([this] { result = setup::Run(disc, update, progress, error); finished = true; });
+            thread = std::thread([this] {
+                result = work ? work(progress, error) : setup::Run(disc, update, progress, error);
+                finished = true;
+            });
         }
         ~Job() { if (thread.joinable()) thread.join(); }
     };
@@ -101,6 +114,30 @@ namespace
         return 0;
     }
 
+    // Looks for a newer version and installs it, from a terminal.
+    int UpgradeInTerminal()
+    {
+        if (!*update::Current()) { std::fprintf(stderr, "This build was not made as a release, so there is no version to compare.\n"); return 1; }
+        update::Release release;
+        std::string error;
+        switch (update::Look(release, error))
+        {
+        case update::Check::UpToDate:
+            std::printf("This is the newest version, %s.\n", update::Current());
+            return 0;
+        case update::Check::Failed:
+            std::fprintf(stderr, "%s\n", error.c_str());
+            return 1;
+        case update::Check::Newer:
+            break;
+        }
+        std::printf("Version %s is out; this is %s. Installing it...\n", release.version.c_str(), update::Current());
+        setup::Progress progress;
+        if (update::Install(release, progress, error) != setup::Result::Done) { std::fprintf(stderr, "Not updated: %s\n", error.c_str()); return 1; }
+        std::printf("Updated to %s.\n", release.version.c_str());
+        return 0;
+    }
+
     // Starts a program beside the launcher and leaves it running.
     bool Start(const char* program)
     {
@@ -113,8 +150,44 @@ namespace
         return true;
     }
 
+    // Whether the campaign or the multiplayer is running: the profile is
+    // theirs to write while they are, and they write it when they end.
+    bool GameRunning()
+    {
+#ifdef _WIN32
+        bool running = false;
+        const HANDLE snapshot = CreateToolhelp32Snapshot(TH32CS_SNAPPROCESS, 0);
+        if (snapshot == INVALID_HANDLE_VALUE) return false;
+        PROCESSENTRY32W process{};
+        process.dwSize = sizeof(process);
+        for (BOOL more = Process32FirstW(snapshot, &process); more && !running; more = Process32NextW(snapshot, &process))
+            running = !_wcsicmp(process.szExeFile, L"mw2-sp.exe") || !_wcsicmp(process.szExeFile, L"mw2-mp.exe");
+        CloseHandle(snapshot);
+        return running;
+#else
+        // The two programs beside the launcher, by the file each process runs.
+        std::error_code ec;
+        const fs::path campaign = fs::weakly_canonical(kCampaign, ec), multiplayer = fs::weakly_canonical(kMultiplayer, ec);
+        for (fs::directory_iterator it("/proc", ec), end; !ec && it != end; it.increment(ec))
+        {
+            const std::string name = it->path().filename().string();
+            if (name.empty() || name.find_first_not_of("0123456789") != std::string::npos) continue;
+            std::error_code ignored;
+            const fs::path program = fs::read_symlink(it->path() / "exe", ignored);
+            if (!ignored && (program == campaign || program == multiplayer)) return true;
+        }
+        return false;
+#endif
+    }
+
     // What an entry does.
-    enum class Action { None, PlayCampaign, PlayMultiplayer, Install, ChooseUpdate, Cancel, Quit };
+    enum class Action
+    {
+        None, PlayCampaign, PlayMultiplayer, Install, ChooseUpdate, Cancel, Quit,
+        // The profile screen and what it does.
+        Profile, Back, NextPlayer, MaxRank, Prestige, UnlockEverything, UnlockMissions, AllStars,
+        CheckUpdate, InstallUpdate,
+    };
 
     struct Entry
     {
@@ -142,6 +215,16 @@ namespace
         bool needsUpdateFile = false;   // the download failed: Install asks for the file
         std::string message;            // what the last job or action came to
         bool messageIsError = false;
+        int messageFocus = -1;          // the profile screen's entry it belongs to
+        bool profileScreen = false;
+        std::vector<profile::Player> players;
+        size_t player = 0;
+        profile::Campaign campaign;
+        update::Release release;        // the newer version a look found, if `newer`
+        bool newer = false;
+        std::string updated;            // the version this start is the first of
+        bool gameRunning = false;       // looked up once a second while the profile screen shows
+        std::chrono::steady_clock::time_point gameChecked{};
         int focus = 0;
         bool focusPlaced = false;
         bool quit = false;
@@ -203,9 +286,157 @@ namespace
             case Action::Quit:
                 quit = true;
                 break;
+            case Action::CheckUpdate:
+                message.clear();
+                job = std::make_unique<Job>();
+                job->kind = Job::Kind::CheckUpdate;
+                job->work = [this](setup::Progress&, std::string& error) {
+                    switch (update::Look(release, error))
+                    {
+                    case update::Check::Newer: return setup::Result::Done;
+                    case update::Check::UpToDate: return setup::Result::Cancelled;
+                    case update::Check::Failed: break;
+                    }
+                    return setup::Result::Failed;
+                };
+                job->Start();
+                break;
+            case Action::InstallUpdate:
+                // Its programs cannot be replaced under it.
+                if (GameRunning())
+                {
+                    message = "The game is running. Close it to update.";
+                    messageIsError = true;
+                    break;
+                }
+                message.clear();
+                job = std::make_unique<Job>();
+                job->kind = Job::Kind::InstallUpdate;
+                job->work = [release = release](setup::Progress& progress, std::string& error) { return update::Install(release, progress, error); };
+                job->Start();
+                break;
+            case Action::Profile:
+            case Action::Back:
+                gameRunning = action == Action::Profile && GameRunning();
+                gameChecked = std::chrono::steady_clock::now();
+                profileScreen = action == Action::Profile;
+                message.clear();
+                messageIsError = false;
+                focusPlaced = false;
+                player = 0;
+                ReadProfile();
+                break;
+            case Action::NextPlayer:
+                player = (player + 1) % players.size();
+                break;
+            case Action::MaxRank:
+            case Action::Prestige:
+            case Action::UnlockEverything:
+            case Action::UnlockMissions:
+            case Action::AllStars:
+                Edit(action);
+                break;
             case Action::None:
                 break;
             }
+        }
+
+        void ReadProfile()
+        {
+            players = profile::Players();
+            player = std::min(player, players.empty() ? 0 : players.size() - 1);
+            campaign = profile::ReadCampaign();
+        }
+
+        // One change to the profile, and what to say about it.
+        void Edit(Action action)
+        {
+            std::string error;
+            bool done = false;
+            const profile::Player* who = players.empty() ? nullptr : &players[player];
+            // The list is the newest first, and a change makes its file the
+            // newest: the player is found again by the file.
+            const fs::path file = who ? who->file : fs::path();
+            switch (action)
+            {
+            case Action::MaxRank:
+                done = who && profile::MaxRank(*who, error);
+                message = "The rank is now 70.";
+                break;
+            case Action::Prestige:
+            {
+                const int prestige = who ? (who->prestige + 1) % (profile::MaxPrestige() + 1) : 0;
+                done = who && profile::SetPrestige(*who, prestige, error);
+                message = "The prestige is now " + std::to_string(prestige) + ".";
+                break;
+            }
+            case Action::UnlockEverything:
+                done = who && profile::UnlockEverything(*who, error);
+                message = "Every challenge is done, and every title, emblem and killstreak unlocked.";
+                break;
+            case Action::UnlockMissions:
+                done = profile::UnlockMissions(error);
+                message = "Every campaign mission is unlocked.";
+                break;
+            case Action::AllStars:
+                done = profile::AllStars(error);
+                message = "Every Special Ops mission has its three stars.";
+                break;
+            default:
+                break;
+            }
+            if (!done) message = error;
+            messageIsError = !done;
+            messageFocus = focus;
+            ReadProfile();
+            for (size_t i = 0; i < players.size(); i++)
+                if (players[i].file == file) player = i;
+        }
+
+        std::vector<Entry> ProfileEntries() const
+        {
+            std::vector<Entry> entries;
+            auto add = [&](Action action, std::string label, bool enabled, const char* heading, std::string text) {
+                Entry entry;
+                entry.shown.label = std::move(label);
+                entry.shown.enabled = enabled;
+                entry.action = enabled ? action : Action::None;
+                entry.heading = heading;
+                entry.text = std::move(text);
+                entries.push_back(std::move(entry));
+                return &entries.back();
+            };
+            const bool any = !players.empty() && !gameRunning;
+            std::string who = "No multiplayer profile yet: play the multiplayer once first.";
+            int prestige = 0;
+            if (!players.empty())
+            {
+                const profile::Player& p = players[player];
+                prestige = p.prestige;
+                who = "Rank " + std::to_string(p.level) + ", prestige " + std::to_string(p.prestige) + ".\n" +
+                      (p.offline ? "The offline profile" : "An online profile") + ", last played " + p.played + ".";
+            }
+            // The game keeps the profile in memory and writes it when it ends,
+            // over anything changed here meanwhile.
+            const std::string close = gameRunning ? "\n\nTHE GAME IS RUNNING. Close it to change the profile." : "";
+            if (players.size() > 1)
+                add(Action::NextPlayer, "PLAYER " + std::to_string(player + 1) + " OF " + std::to_string(players.size()), true, "PLAYER",
+                    who + "\n\nSeveral players have played here. Choose to go to the next one.");
+            add(Action::MaxRank, "MAX RANK", any, "MULTIPLAYER RANK", who + "\n\nSets the rank to 70, which unlocks every weapon, perk and equipment." + close);
+            add(Action::Prestige, "PRESTIGE " + std::to_string(prestige), any, "PRESTIGE",
+                who + "\n\nEach choice is one prestige more; after " + std::to_string(profile::MaxPrestige()) + " it is 0 again. The rank stays." + close);
+            add(Action::UnlockEverything, "UNLOCK EVERYTHING", any, "CHALLENGES AND UNLOCKS",
+                who + "\n\nMarks every challenge as done, which gives every attachment and camouflage, and unlocks every title, emblem and killstreak." + close);
+
+            const std::string progress = campaign.found
+                ? "Special Ops: " + std::to_string(campaign.stars) + " of 69 stars."
+                : std::string("No campaign profile yet: start the campaign once first.");
+            add(Action::UnlockMissions, "UNLOCK ALL MISSIONS", campaign.found && !gameRunning, "CAMPAIGN",
+                progress + "\n\nOpens every mission of the campaign in the mission list." + close)->shown.ruleAbove = true;
+            add(Action::AllStars, "ALL SPEC OPS STARS", campaign.found && !gameRunning, "SPECIAL OPS",
+                progress + "\n\nGives every Special Ops mission its three stars, which opens all of them." + close);
+            add(Action::Back, "BACK", true, "", "A file is copied to <name>.backup, beside it under saves/, before its first change.")->shown.ruleAbove = true;
+            return entries;
         }
 
         // A file the dialog returned, or one dropped on the window.
@@ -238,6 +469,38 @@ namespace
             }
             if (forAction != Action::None) Take(forAction, path);
 
+            if (profileScreen && std::chrono::steady_clock::now() - gameChecked > std::chrono::seconds(1))
+            {
+                const bool was = gameRunning;
+                gameRunning = GameRunning();
+                gameChecked = std::chrono::steady_clock::now();
+                // It has ended and written its files: read them again.
+                if (was && !gameRunning) ReadProfile();
+            }
+
+            if (job && job->finished && job->kind != Job::Kind::Install)
+            {
+                job->thread.join();
+                const setup::Result result = job->result;
+                messageIsError = result == setup::Result::Failed;
+                if (job->kind == Job::Kind::CheckUpdate)
+                {
+                    newer = result == setup::Result::Done;
+                    message = newer                               ? ""
+                              : result == setup::Result::Failed   ? job->error
+                                                                  : std::string("This is the newest version, ") + update::Current() + ".";
+                }
+                else if (result == setup::Result::Done)
+                {
+                    // The new launcher takes over from here.
+                    if (Start(kLauncher)) quit = true;
+                    else message = "The new version is installed. Start the launcher again.";
+                    newer = false;
+                }
+                else message = result == setup::Result::Cancelled ? "The update was stopped. Nothing was changed." : job->error;
+                job.reset();
+            }
+
             if (job && job->finished)
             {
                 job->thread.join();
@@ -258,10 +521,11 @@ namespace
 
         std::vector<Entry> Entries() const
         {
+            if (profileScreen) return ProfileEntries();
             std::vector<Entry> entries;
-            auto add = [&](Action action, const char* label, bool enabled, const char* heading, std::string text) {
+            auto add = [&](Action action, std::string label, bool enabled, const char* heading, std::string text) {
                 Entry entry;
-                entry.shown.label = label;
+                entry.shown.label = std::move(label);
                 entry.shown.enabled = enabled;
                 entry.action = enabled ? action : Action::None;
                 entry.heading = heading;
@@ -271,7 +535,7 @@ namespace
             };
             if (job)
             {
-                add(Action::Cancel, "CANCEL", true, "INSTALLING", "");
+                add(Action::Cancel, "CANCEL", true, job->kind == Job::Kind::Install ? "INSTALLING" : "UPDATES", "");
                 return entries;
             }
             const bool installed = state == setup::State::Installed;
@@ -303,21 +567,27 @@ namespace
                                   "\n\nThe disc is the USA/Europe one, version 1.0.557.");
             install->shown.ruleAbove = true;
 
+            add(Action::Profile, "PROFILE", true, "PROFILE",
+                "Set the multiplayer rank and prestige, unlock everything, and open the campaign's and Special Ops' missions.");
             // What an install is for, once there is more than playing it.
-            for (const auto& [label, heading, text] : {
-                     std::tuple{ "MAPS", "MAPS", "Add and remove custom maps." },
-                     std::tuple{ "PROFILE", "PROFILE", "Edit the multiplayer rank and unlocks, and the campaign's progress." },
-                     std::tuple{ "CHECK FOR UPDATES", "UPDATES", "Look for a newer version of this program." } })
-            {
-                Entry* soon = add(Action::None, label, false, heading, std::string(text) + "\n\nNot available yet.");
-                soon->shown.tag = "SOON";
-            }
+            add(Action::None, "MAPS", false, "MAPS", "Add and remove custom maps.\n\nNot available yet.")->shown.tag = "SOON";
+            // A build nobody released has no version to compare.
+            const bool released = *update::Current() != 0;
+            if (newer)
+                add(Action::InstallUpdate, "UPDATE TO " + release.version, true, "UPDATES",
+                    "Version " + release.version + " is out; this is " + update::Current() + ".\n\n"
+                    "It is downloaded (" + std::to_string((release.size + 500000) / 1000000) + " MB) and put in place of this one, "
+                    "and the launcher starts again. The game's files and your saves stay as they are.");
+            else
+                add(Action::CheckUpdate, "CHECK FOR UPDATES", released, "UPDATES",
+                    released ? std::string("Look for a newer version than this one, ") + update::Current() + "."
+                             : std::string("This build was not made as a release, so there is no version to compare."));
             add(Action::Quit, "QUIT", true, "", "")->shown.ruleAbove = true;
             return entries;
         }
     };
 
-    int Window()
+    int Window(const std::string& updated)
     {
         if (!SDL_Init(SDL_INIT_VIDEO | SDL_INIT_GAMEPAD))
         {
@@ -354,6 +624,7 @@ namespace
         SDL_Texture* backdrop = ui::MakeBackdrop(renderer);
 
         app.state = setup::Detect();
+        app.updated = updated;
         while (!app.quit)
         {
             SDL_Event event;
@@ -396,6 +667,12 @@ namespace
             app.focus = std::clamp(app.focus, 0, count - 1);
             int chosen = pressed({ ImGuiKey_Enter, ImGuiKey_KeypadEnter, ImGuiKey_Space, ImGuiKey_GamepadFaceDown }, false) ? app.focus : -1;
             if (app.job && pressed({ ImGuiKey_Escape, ImGuiKey_GamepadFaceRight }, false)) app.job->progress.cancel = true;
+            else if (app.profileScreen && pressed({ ImGuiKey_Escape, ImGuiKey_GamepadFaceRight }, false))
+            {
+                app.Do(Action::Back);
+                ImGui::EndFrame();
+                continue;
+            }
 
             ui::Frame frame;
             for (const Entry& entry : entries) frame.entries.push_back(entry.shown);
@@ -413,9 +690,14 @@ namespace
                 frame.detail = progress.detail;
                 frame.amount = Amount(progress.done, progress.total);
                 frame.fraction = progress.total ? float(double(progress.done) / double(progress.total)) : -1.0f;
-                frame.text = progress.cancel ? "Stopping..." : "Stopping and starting again later carries on where it left off.";
+                frame.text = progress.cancel                            ? "Stopping..."
+                             : app.job->kind == Job::Kind::CheckUpdate ? "Looking for a newer version..."
+                             : app.job->kind == Job::Kind::InstallUpdate ? "The launcher starts again when it is done."
+                                                                         : "Stopping and starting again later carries on where it left off.";
             }
-            else if (!app.message.empty() && (current.action == Action::Install || current.action == Action::ChooseUpdate || app.messageIsError))
+            else if (app.profileScreen ? !app.message.empty() && app.focus == app.messageFocus
+                                       : !app.message.empty() && (current.action == Action::Install || current.action == Action::ChooseUpdate ||
+                                                                  current.action == Action::CheckUpdate || current.action == Action::InstallUpdate || app.messageIsError))
             {
                 frame.text = app.message;
                 frame.error = app.messageIsError;
@@ -425,12 +707,15 @@ namespace
                            : app.state == setup::State::NeedsUpdate ? "The game is installed from the disc and needs title update 6."
                                                                     : "The game is not installed.";
             frame.corner = setup::UsesUpdate() ? "TITLE UPDATE 6" : "DISC VERSION 1.0.557";
-            frame.hint = "ENTER OR (A) TO CHOOSE";
+            if (*update::Current()) frame.corner = std::string(update::Current()) + "   " + frame.corner;
+            if (!app.updated.empty()) frame.status = "Updated to " + app.updated + ". " + frame.status;
+            frame.hint = app.profileScreen ? "ENTER OR (A) TO CHOOSE, ESC OR (B) TO GO BACK" : "ENTER OR (A) TO CHOOSE";
 
             const int pointed = ui::Draw(fonts, frame, scale, app.focus);
             if (pointed >= 0) chosen = pointed;
             // Reading a message dismisses it: the next move shows the entries' own text again.
             if (chosen >= 0 && !app.messageIsError) app.message.clear();
+            if (chosen >= 0 && chosen != app.focus) app.focus = chosen;
             if (chosen >= 0) app.Do(entries[chosen].action);
 
             ImGui::Render();
@@ -483,7 +768,8 @@ int main(int argc, char** argv)
     // copy keeps -- game/, saves/ -- is beside the launcher.
     std::error_code ec;
     fs::path disc, update;
-    bool usage = !arguments.empty() && arguments[0] != "--install";
+    const bool upgrade = arguments.size() == 1 && arguments[0] == "--upgrade";
+    bool usage = !arguments.empty() && arguments[0] != "--install" && !upgrade;
     for (size_t i = 1; i < arguments.size() && !usage; i++)
     {
         const std::string text = Utf8(arguments[i]);
@@ -493,14 +779,19 @@ int main(int argc, char** argv)
     }
     if (const char* base = SDL_GetBasePath()) fs::current_path(FromUtf8(base), ec);
 
+    // What the last update left behind goes, now that the launcher it
+    // replaced has ended.
+    const std::string updated = update::Finish();
     if (!arguments.empty())
     {
         if (usage)
         {
-            std::fprintf(stderr, "usage: %s --install [<disc image or extracted disc folder>] [--update <package or folder>]\n", argv[0]);
+            std::fprintf(stderr, "usage: %s --install [<disc image or extracted disc folder>] [--update <package or folder>]\n"
+                                 "       %s --upgrade\n", argv[0], argv[0]);
             return 2;
         }
+        if (upgrade) return UpgradeInTerminal();
         return InstallInTerminal(disc, update);
     }
-    return Window();
+    return Window(updated);
 }

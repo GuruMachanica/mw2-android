@@ -114,3 +114,54 @@ stick directions with a hold time; the whole first boot (brightness,
 horizontal margin, vertical margin, then the content notice) is:
 
     MW2_INPUT_SCRIPT="15:start,20:lx-:1,24:a,28:lx-:1,32:a,36:lx-:1,40:a,46:a"
+
+## What the launcher changes
+
+The launcher's PROFILE screen (`launcher/profile.cpp`) edits two of these files
+itself, without the title; each is copied to `<name>.backup` before its first
+change.
+
+**The multiplayer's stats.** A player's rank, unlocks and classes are one
+buffer the title lays out by `mp/playerdata.def`. The online service keeps it
+as `saves/online/user/<xuid>/mpdata`: a CRC-32 of the rest, high byte first,
+then the buffer, 8188 bytes whose values are low byte first and which opens
+with the layout's version (155) and checksum. The offline profile's is the
+content package `saves/mpdata_<xuid>/`, the same with four bytes before and
+one after. A file with another version or checksum is left alone.
+
+Where a value is in the buffer is the title's knowledge, in a signed fastfile,
+as are the challenges' tiers and the ranks. `tools/playerdata_layout.py` reads
+all three from a running multiplayer's memory and writes
+`launcher/playerdata_layout.h`, which is committed. From it:
+
+| entry | change |
+|---|---|
+| MAX RANK | `experience` to the last rank's end |
+| PRESTIGE | `prestige`, one more each time, 0 after 10 |
+| UNLOCK EVERYTHING | each challenge's `challengeState` to one past its last tier and its `challengeProgress` to that tier's target; every bit of `titleUnlocked`, `iconUnlocked` and `killstreakUnlocked` |
+
+The title's own console commands are the check on a change: `dumpPlayerData`
+prints the whole buffer by name as the title reads it, `setPlayerData` and
+`getPlayerData` take a path into it, `uploadStats` writes the file
+(`MW2_CONSOLE`, `MW2_ENGINE_LOG=1`).
+
+**The campaign's progress** is in the profile, in two of the title's
+settings. Each is `SEMV`, two words, then numbered fields: a number, a type
+and a value -- one byte (types 1 and 2), 32 bits (4 and 5), or a string (6) as
+two 16-bit words (where it goes in the title's string area, and its room) and
+its characters up to a zero.
+
+- `0x63E83FFE`, the campaign's own: field 6 is `highestMission`, field 7
+  `missionspecops`, fields `0x22` and `0x23` the highest difficulty each
+  campaign and Special Ops mission was finished at, a digit per mission.
+- `0x63E83FFF`, which both executables read: field `0x0E` is
+  `percentcompleteso`, which despite its name is the number of Special Ops
+  stars, and what the menus open the mission groups by.
+
+The names are the title's, from its table of profile fields at `0x82011330`.
+
+| entry | change |
+|---|---|
+| UNLOCK ALL MISSIONS | `highestMission` to 20 |
+| ALL SPEC OPS STARS | the first 23 digits of field `0x23` to `4`, veteran, which is three stars, and the star count to 69 |
+

@@ -35,10 +35,10 @@ jobs:
       CCACHE_MAXSIZE: 6G
       CCACHE_COMPILERCHECK: content
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v6
 
       - name: Check out the game's executables
-        uses: actions/checkout@v4
+        uses: actions/checkout@v6
         with:
           repository: ${{ secrets.ASSET_REPO }}
           token: ${{ secrets.ASSET_REPO_TOKEN }}
@@ -75,7 +75,7 @@ jobs:
           rm -rf Vulkan-Headers llvm.sh
 
       - name: Restore the compiler cache
-        uses: actions/cache@v4
+        uses: actions/cache@v5
         with:
           path: .ccache
           key: ccache-linux-${{ github.sha }}
@@ -87,7 +87,7 @@ jobs:
           for title in sp mp; do
             regenerate=1
             for online in steam lan; do
-              VERSION=${{ inputs.game_version }} TITLE=$title RELEASE=1 ONLINE=$online BUILD_DIR=out/$title-$online REGENERATE=$regenerate ./build.sh
+              VERSION=${{ inputs.game_version }} TITLE=$title RELEASE=1 RELEASE_TAG=${{ inputs.version }} ONLINE=$online BUILD_DIR=out/$title-$online REGENERATE=$regenerate ./build.sh
               regenerate=0
             done
           done
@@ -110,7 +110,7 @@ jobs:
           echo "glibc needed: $(objdump -T out/mp-steam/mw2 | grep -oE 'GLIBC_[0-9.]+' | sort -Vu | tail -1)"
           ls -la dist
 
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@v6
         with:
           name: linux
           path: dist/*
@@ -127,10 +127,10 @@ jobs:
       CCACHE_COMPILERCHECK: content
       LLVM_MINGW_RELEASE: "20260922"
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v6
 
       - name: Check out the game's executables
-        uses: actions/checkout@v4
+        uses: actions/checkout@v6
         with:
           repository: ${{ secrets.ASSET_REPO }}
           token: ${{ secrets.ASSET_REPO_TOKEN }}
@@ -154,7 +154,7 @@ jobs:
           echo "LLVM_MINGW=$HOME/$name" >> "$GITHUB_ENV"
 
       - name: Restore the compiler cache
-        uses: actions/cache@v4
+        uses: actions/cache@v5
         with:
           path: .ccache
           key: ccache-windows-${{ github.sha }}
@@ -166,7 +166,7 @@ jobs:
           for title in sp mp; do
             regenerate=1
             for online in steam lan; do
-              WINDOWS=1 VERSION=${{ inputs.game_version }} TITLE=$title RELEASE=1 ONLINE=$online BUILD_DIR=out/$title-$online REGENERATE=$regenerate ./build.sh
+              WINDOWS=1 VERSION=${{ inputs.game_version }} TITLE=$title RELEASE=1 RELEASE_TAG=${{ inputs.version }} ONLINE=$online BUILD_DIR=out/$title-$online REGENERATE=$regenerate ./build.sh
               regenerate=0
             done
           done
@@ -188,7 +188,7 @@ jobs:
           done
           ls -la dist
 
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@v6
         with:
           name: windows
           path: dist/*
@@ -197,7 +197,7 @@ jobs:
     needs: [linux, windows]
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/download-artifact@v4
+      - uses: actions/download-artifact@v7
         with:
           path: dist
           merge-multiple: true

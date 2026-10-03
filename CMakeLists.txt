@@ -291,6 +291,16 @@ if(MW2_USE_SDL)
         "${XENON}/thirdparty/libmspack/libmspack/mspack"
         "${XENON}/thirdparty/tiny-AES-c" "${XENON}/thirdparty/TinySHA1")
     target_compile_definitions(launcher PRIVATE ${MW2_HASH_DEFINITIONS} NOMINMAX)
+    # What release this is, for the launcher to look for a newer one: the
+    # release workflow gives the tag. A build without one does not update.
+    set(MW2_RELEASE_TAG "" CACHE STRING "The release tag this build is published as, e.g. v0.3.0")
+    if(WIN32)
+        set(MW2_RELEASE_KIND "windows-${MW2_ONLINE}")
+    else()
+        set(MW2_RELEASE_KIND "linux-${MW2_ONLINE}")
+    endif()
+    set_source_files_properties("${CMAKE_SOURCE_DIR}/launcher/update.cpp" PROPERTIES COMPILE_DEFINITIONS
+        "MW2_RELEASE_TAG=\"${MW2_RELEASE_TAG}\";MW2_RELEASE_KIND=\"${MW2_RELEASE_KIND}\"")
     target_link_libraries(launcher PRIVATE SDL3::SDL3-static)
     if(WIN32)
         # The program's icon, as Explorer and the taskbar show it.

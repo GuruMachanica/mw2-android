@@ -168,11 +168,14 @@ it is, the right half in the multiplayer's colours.
 | `disc.cpp` | reads a disc image (XDVDFS) or an extracted folder |
 | `package.cpp` | reads the update's package (STFS), as `tools/stfs.py` does |
 | `download.cpp` | one file over HTTPS: `URLDownloadToFile` on Windows, the `curl` program elsewhere |
+| `update.cpp` | looks for a newer release and puts it in place of the running programs |
+| `profile.cpp` | the profile screen's changes to the files under `saves/` ([saves.md](saves.md#what-the-launcher-changes)) |
+| `playerdata_layout.h` | generated: where the multiplayer's stats file keeps what `profile.cpp` changes |
 
 An install, in order: the disc's two executables are read and checked against
 the known disc; the update is taken from the file or folder given, from a
-package left beside the launcher, or downloaded from the codxe repository at a
-pinned commit; its three fastfiles are checked, and each patch is applied in
+package left beside the launcher, or downloaded from CoD Xenon's archive of
+title updates (`codxenon/xbox360-title-updates`) at a pinned commit; its three fastfiles are checked, and each patch is applied in
 memory and the result checked against the executable the build was made from.
 Only then are the disc's `.ff`, `.pak` and `.bik` copied into `game/` (a file
 already there, whole, is kept, so an install cut short resumes), then the
@@ -187,9 +190,36 @@ does the same from a terminal; with no disc it updates the install in place.
 
 The screen is a description (`ui::Frame`) that `main.cpp` fills each frame from
 a list of entries, each with an action and the text the pane shows for it.
-MAPS, PROFILE and CHECK FOR UPDATES are entries without an action yet.
+PROFILE swaps the list for its own (`ProfileEntries`); MAPS is an entry
+without an action yet.
 PLAY CAMPAIGN and PLAY MULTIPLAYER start `mw2-sp` and `mw2-mp` beside the
 launcher, the names a release gives the two game executables.
+
+### Updating itself
+
+CHECK FOR UPDATES (`update.cpp`) looks only when the player asks. It fetches
+GitHub's description of the newest published release
+(`api.github.com/repos/.../releases/latest`), which has the release's tag and,
+for each archive, its name, size, SHA-256 and address, and compares the tag
+with its own. The workflow gives the build its tag
+(`RELEASE_TAG=v0.3.0 ./build.sh`, CMake's `MW2_RELEASE_TAG`); a build without
+one has nothing to compare and the entry is off. The archive it wants is the
+one for its system and online service, `mw2-<tag>-<linux|windows>-<service>`.
+
+Choosing UPDATE TO downloads that archive into `update/` beside the launcher,
+checks its SHA-256, unpacks it with the system's `tar` (Windows 10 and later
+have one, and it reads a `.zip`), and swaps each file in: the one it replaces
+is moved to `update/old/` first, and moved back if a later one fails. A
+running program can be moved but not deleted, the launcher included, so
+`update/` is removed by the next start, which the launcher makes itself.
+`game/` and `saves/` are not touched; a release built from another version of
+the game shows UPDATE GAME as any install of another version does.
+
+    mw2-launcher --upgrade
+
+does the same from a terminal. `MW2_UPDATE_URL=<address>` names another
+description of the same form: a mirror's, or a file as `file://` to try an
+update without publishing one.
 
 ## Windows
 
