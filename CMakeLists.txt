@@ -27,12 +27,21 @@ elseif(MW2_TITLE STREQUAL "mp")
 else()
     message(FATAL_ERROR "MW2_TITLE must be sp or mp, not '${MW2_TITLE}'")
 endif()
+# And which version of it: the one title update 6 makes of the disc's (tu6),
+# or the disc's own (tu0), recompiled into ppc_tu0/ and ppc_mp_tu0/.
+set(MW2_VERSION "tu6" CACHE STRING "Which version of the executable: tu6 (title update 6) or tu0 (the disc's)")
+if(MW2_VERSION STREQUAL "tu0")
+    set(MW2_PPC_DIR "${MW2_PPC_DIR}_tu0")
+    add_compile_definitions(MW2_VERSION_TU0=1)
+elseif(NOT MW2_VERSION STREQUAL "tu6")
+    message(FATAL_ERROR "MW2_VERSION must be tu6 or tu0, not '${MW2_VERSION}'")
+endif()
 
 # ---- recompiled guest code -------------------------------------------------
 file(GLOB PPC_SOURCES CONFIGURE_DEPENDS "${MW2_PPC_DIR}/ppc_recomp.*.cpp")
 list(APPEND PPC_SOURCES "${MW2_PPC_DIR}/ppc_func_mapping.cpp")
 if(NOT PPC_SOURCES)
-    message(FATAL_ERROR "${MW2_PPC_DIR} is empty -- run TITLE=${MW2_TITLE} ./build.sh first to generate it")
+    message(FATAL_ERROR "${MW2_PPC_DIR} is empty -- run TITLE=${MW2_TITLE} VERSION=${MW2_VERSION} ./build.sh first to generate it")
 endif()
 
 add_library(ppc_recomp STATIC ${PPC_SOURCES})
@@ -89,21 +98,39 @@ else()
     target_compile_definitions(mw2 PRIVATE MW2_DIAGNOSTICS=0)
 endif()
 target_include_directories(mw2 PRIVATE "${CMAKE_SOURCE_DIR}/runtime")
-# The installer accepts only the executables this build was recompiled from
-# (runtime/install/install.cpp); both, since either executable installs both.
-foreach(xex default default_mp)
-    set(xex_path "${CMAKE_SOURCE_DIR}/mw2/${xex}.xex")
-    if(NOT EXISTS "${xex_path}")
-        message(FATAL_ERROR "${xex_path} is missing -- build.sh extracts it from the ISO")
+# A game executable runs only the title executable it was recompiled from, and
+# the launcher installs only the disc it is an update of: each known by its
+# SHA-256, read here from mw2/ (runtime/install/install.cpp, launcher/setup.cpp).
+if(MW2_VERSION STREQUAL "tu0")
+    set(MW2_XEX_DIR "${CMAKE_SOURCE_DIR}/mw2/tu0")
+else()
+    set(MW2_XEX_DIR "${CMAKE_SOURCE_DIR}/mw2")
+endif()
+function(mw2_sha256 variable path)
+    if(NOT EXISTS "${path}")
+        message(FATAL_ERROR "${path} is missing -- build.sh makes it from the ISO and the title update")
     endif()
-    set_property(DIRECTORY APPEND PROPERTY CMAKE_CONFIGURE_DEPENDS "${xex_path}")
-    file(SHA256 "${xex_path}" xex_sha256)
-    list(APPEND MW2_XEX_HASHES "${xex_sha256}")
-endforeach()
-list(GET MW2_XEX_HASHES 0 MW2_XEX_SHA256_SP)
-list(GET MW2_XEX_HASHES 1 MW2_XEX_SHA256_MP)
-target_compile_definitions(mw2 PRIVATE
-    MW2_XEX_SHA256_SP="${MW2_XEX_SHA256_SP}" MW2_XEX_SHA256_MP="${MW2_XEX_SHA256_MP}")
+    set_property(DIRECTORY APPEND PROPERTY CMAKE_CONFIGURE_DEPENDS "${path}")
+    file(SHA256 "${path}" hash)
+    set(${variable} "${hash}" PARENT_SCOPE)
+endfunction()
+mw2_sha256(MW2_XEX_SHA256_SP  "${MW2_XEX_DIR}/default.xex")
+mw2_sha256(MW2_XEX_SHA256_MP  "${MW2_XEX_DIR}/default_mp.xex")
+mw2_sha256(MW2_DISC_SHA256_SP "${CMAKE_SOURCE_DIR}/mw2/tu0/default.xex")
+mw2_sha256(MW2_DISC_SHA256_MP "${CMAKE_SOURCE_DIR}/mw2/tu0/default_mp.xex")
+set(MW2_HASH_DEFINITIONS
+    MW2_XEX_SHA256_SP="${MW2_XEX_SHA256_SP}" MW2_XEX_SHA256_MP="${MW2_XEX_SHA256_MP}"
+    MW2_DISC_SHA256_SP="${MW2_DISC_SHA256_SP}" MW2_DISC_SHA256_MP="${MW2_DISC_SHA256_MP}")
+if(NOT MW2_VERSION STREQUAL "tu0")
+    mw2_sha256(MW2_UPDATE_SHA256_PATCH_MP   "${CMAKE_SOURCE_DIR}/mw2/update/patch_mp.ff")
+    mw2_sha256(MW2_UPDATE_SHA256_DLC1_UI_MP "${CMAKE_SOURCE_DIR}/mw2/update/dlc1_ui_mp.ff")
+    mw2_sha256(MW2_UPDATE_SHA256_DLC2_UI_MP "${CMAKE_SOURCE_DIR}/mw2/update/dlc2_ui_mp.ff")
+    list(APPEND MW2_HASH_DEFINITIONS
+        MW2_UPDATE_SHA256_PATCH_MP="${MW2_UPDATE_SHA256_PATCH_MP}"
+        MW2_UPDATE_SHA256_DLC1_UI_MP="${MW2_UPDATE_SHA256_DLC1_UI_MP}"
+        MW2_UPDATE_SHA256_DLC2_UI_MP="${MW2_UPDATE_SHA256_DLC2_UI_MP}")
+endif()
+target_compile_definitions(mw2 PRIVATE ${MW2_HASH_DEFINITIONS})
 if(WIN32)
     # One executable with nothing beside it: the C++ runtime and the threads
     # linked in. The recompiled code nests deep on the host stack, and a thread
@@ -199,4 +226,74 @@ if(Vulkan_FOUND)
     target_link_libraries(upload-texture PRIVATE Vulkan::Vulkan)
     target_compile_definitions(upload-texture PRIVATE MW2_HAVE_VULKAN=1)
 endif()
+endif()
+
+# ---- launcher --------------------------------------------------------------
+# What a player opens (launcher/): it installs the game and starts it. One
+# executable with nothing beside it, like the game's: Dear ImGui on SDL's own
+# renderer, the fonts as arrays, and XenonRecomp's patcher, which applies the
+# title update, compiled in from its checkout.
+if(MW2_USE_SDL)
+    enable_language(C)
+    FetchContent_Declare(imgui
+        GIT_REPOSITORY https://github.com/ocornut/imgui.git
+        GIT_TAG v1.91.9b
+        GIT_SHALLOW TRUE)
+    FetchContent_MakeAvailable(imgui)
+
+    # third_party/fonts/*.ttf as C arrays.
+    set(MW2_FONTS_SOURCE "${CMAKE_BINARY_DIR}/launcher_fonts.cpp")
+    set(fonts_text "// Generated by CMake from third_party/fonts/.\n")
+    foreach(font "Menu=BarlowCondensed-Regular" "Heading=BarlowCondensed-Medium" "Body=BarlowSemiCondensed-Regular")
+        string(REPLACE "=" ";" font "${font}")
+        list(GET font 0 font_name)
+        list(GET font 1 font_file)
+        set(font_path "${CMAKE_SOURCE_DIR}/third_party/fonts/${font_file}.ttf")
+        set_property(DIRECTORY APPEND PROPERTY CMAKE_CONFIGURE_DEPENDS "${font_path}")
+        file(READ "${font_path}" font_hex HEX)
+        string(LENGTH "${font_hex}" font_length)
+        math(EXPR font_size "${font_length} / 2")
+        string(REGEX REPLACE "([0-9a-f][0-9a-f])" "0x\\1," font_bytes "${font_hex}")
+        string(APPEND fonts_text "extern const unsigned char kFont${font_name}[] = { ${font_bytes} };\n"
+                                 "extern const unsigned kFont${font_name}Size = ${font_size};\n")
+    endforeach()
+    file(GENERATE OUTPUT "${MW2_FONTS_SOURCE}" CONTENT "${fonts_text}")
+
+    set(XENON "${CMAKE_SOURCE_DIR}/XenonRecomp")
+    file(GLOB LAUNCHER_SOURCES CONFIGURE_DEPENDS "${CMAKE_SOURCE_DIR}/launcher/*.cpp")
+    add_executable(launcher ${LAUNCHER_SOURCES}
+        "${MW2_FONTS_SOURCE}"
+        "${CMAKE_SOURCE_DIR}/runtime/install/crypto.cpp"
+        "${CMAKE_SOURCE_DIR}/runtime/install/xex.cpp"
+        "${imgui_SOURCE_DIR}/imgui.cpp"
+        "${imgui_SOURCE_DIR}/imgui_draw.cpp"
+        "${imgui_SOURCE_DIR}/imgui_tables.cpp"
+        "${imgui_SOURCE_DIR}/imgui_widgets.cpp"
+        "${imgui_SOURCE_DIR}/backends/imgui_impl_sdl3.cpp"
+        "${imgui_SOURCE_DIR}/backends/imgui_impl_sdlrenderer3.cpp"
+        "${XENON}/XenonUtils/xex_patcher.cpp"
+        "${XENON}/XenonUtils/memory_mapped_file.cpp"
+        "${XENON}/thirdparty/libmspack/libmspack/mspack/lzxd.c"
+        "${XENON}/thirdparty/tiny-AES-c/aes.c")
+    set_target_properties(launcher PROPERTIES OUTPUT_NAME mw2-launcher)
+    target_include_directories(launcher PRIVATE
+        "${imgui_SOURCE_DIR}" "${imgui_SOURCE_DIR}/backends"
+        "${XENON}/XenonUtils" "${XENON}/thirdparty/simde"
+        "${XENON}/thirdparty/libmspack/libmspack/mspack"
+        "${XENON}/thirdparty/tiny-AES-c" "${XENON}/thirdparty/TinySHA1")
+    target_compile_definitions(launcher PRIVATE ${MW2_HASH_DEFINITIONS} NOMINMAX)
+    target_link_libraries(launcher PRIVATE SDL3::SDL3-static)
+    if(WIN32)
+        target_include_directories(launcher PRIVATE "${CMAKE_SOURCE_DIR}/launcher/compat")
+        target_link_libraries(launcher PRIVATE urlmon)
+        target_link_options(launcher PRIVATE -static)
+        if(NOT MW2_DIAGNOSTICS)
+            target_link_options(launcher PRIVATE -mwindows)
+        endif()
+    else()
+        target_link_libraries(launcher PRIVATE pthread)
+        if(MW2_PORTABLE)
+            target_link_options(launcher PRIVATE -static-libstdc++ -static-libgcc)
+        endif()
+    endif()
 endif()

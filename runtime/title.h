@@ -15,14 +15,23 @@
 // hook that names it is compiled out under #ifdef.
 //
 // The multiplayer addresses were found with tools/find_in_title.py. Comments
-// elsewhere in the runtime cite the single-player addresses.
+// elsewhere in the runtime cite the disc's single-player addresses, which the
+// update moved by eight bytes at most.
 //
 // The build selects the title: -DMW2_TITLE=mp defines MW2_TITLE_MP.
+//
+// It also selects the version. The executables are the ones title update 6
+// makes of the disc's; -DMW2_VERSION=tu0 defines MW2_VERSION_TU0 for the
+// disc's own, whose blocks come last and carry no comments: each entry is the
+// same function or datum as the update's, found by its instructions (the
+// functions) or by what the same instructions of the same function form (the
+// data). The multiplayer's client state is 0x200 smaller on the disc; the
+// fields read here have the same offsets.
 
-#ifdef MW2_TITLE_MP
+#if defined(MW2_TITLE_MP) && !defined(MW2_VERSION_TU0)
 
 #define MW2_TITLE_NAME  "multiplayer"
-#define T_ENTRY_POINT   0x823A7FE0u          // the XEX header's ENTRY_POINT
+#define T_ENTRY_POINT   0x823A90C8u          // the XEX header's ENTRY_POINT
 
 // D3D9 (statically linked; the same library build in both executables)
 #define T_D3D_Present          820DFD10
@@ -32,14 +41,14 @@
 #define T_D3D_InitVertexShader 820D7588   // the same for a vertex shader
 
 // the job system
-#define T_Job_WaitPredicate    823EFBA0
+#define T_Job_WaitPredicate    823F0C80
 
 // the engine
-#define T_Com_Error            82281758
-#define T_Com_Printf           8227EC30
-#define T_Cbuf_AddText         82275470
-#define T_Memcard_InitializeSystem 8233CAF0
-#define T_Image_FlushMove      823DD658
+#define T_Com_Error            82281FA0
+#define T_Com_Printf           8227F448
+#define T_Cbuf_AddText         82275C60
+#define T_Memcard_InitializeSystem 8233D890
+#define T_Image_FlushMove      823DE738
 // not located in the multiplayer: T_DB_MissingAsset
 
 // data
@@ -47,19 +56,19 @@
 #define T_DATA_DebugMonitorPtr    0x820007F4u   // the KeDebugMonitorData import record
 #define T_DATA_DeviceTable        0u
 // Where the player stands, as the title's own `viewpos` command reads it
-// (sub_821237C0). That command indexes an array of client states; with one local
+// (sub_82123638). That command indexes an array of client states; with one local
 // player the index is zero, so the pointer to the array is the state. `Valid` is
 // the field it checks before printing, and the offsets are its own.
-#define T_DATA_ClientStates       0x824C3C24u   // pointer to the client states
-#define T_CLIENT_STRIDE           0x000FDC00u
+#define T_DATA_ClientStates       0x824C5B64u   // pointer to the client states
+#define T_CLIENT_STRIDE           0x000FDE00u
 #define T_CLIENT_VALID            13260u
 #define T_CLIENT_ORIGIN           437312u       // x, y, z
 #define T_CLIENT_ANGLES           453512u       // pitch, yaw, roll
 
-#else
+#elif !defined(MW2_VERSION_TU0)
 
 #define MW2_TITLE_NAME  "campaign"
-#define T_ENTRY_POINT   0x82370938u          // the XEX header's ENTRY_POINT
+#define T_ENTRY_POINT   0x82370940u          // the XEX header's ENTRY_POINT
 
 // D3D9
 #define T_D3D_Present          820C3390
@@ -72,11 +81,11 @@
 #define T_Job_WaitPredicate    823B7840
 
 // the engine
-#define T_Com_Error            822830E8
-#define T_Com_Printf           82280900
-#define T_Cbuf_AddText         8227CF18
+#define T_Com_Error            822830F0
+#define T_Com_Printf           82280908
+#define T_Cbuf_AddText         8227CF20
 #define T_DB_MissingAsset      82172340
-#define T_Memcard_InitializeSystem 8230DF88
+#define T_Memcard_InitializeSystem 8230DF90
 #define T_Image_FlushMove      823A52F8
 
 // data
@@ -85,6 +94,55 @@
 #define T_DATA_DeviceTable        0x83A53020u   // Memcard's chosen device per controller
 // Not derived for the campaign, which takes `setviewpos` and does not need the
 // autopilot the multiplayer needs. The code reading these checks for zero.
+#define T_DATA_ClientStates       0u
+#define T_CLIENT_STRIDE           0u
+#define T_CLIENT_VALID            0u
+#define T_CLIENT_ORIGIN           0u
+#define T_CLIENT_ANGLES           0u
+
+#elif defined(MW2_TITLE_MP)
+
+#define MW2_TITLE_NAME  "multiplayer, disc version"
+#define T_ENTRY_POINT   0x823A7FE0u
+#define T_D3D_Present          820DFD10
+#define T_D3D_ArenaWait        820E1E70
+#define T_D3D_ReplayRecording  820E4848
+#define T_D3D_InitPixelShader  820D7268
+#define T_D3D_InitVertexShader 820D7588
+#define T_Job_WaitPredicate    823EFBA0
+#define T_Com_Error            82281758
+#define T_Com_Printf           8227EC30
+#define T_Cbuf_AddText         82275470
+#define T_Memcard_InitializeSystem 8233CAF0
+#define T_Image_FlushMove      823DD658
+#define T_DATA_TimeStampBundlePtr 0x820007B4u
+#define T_DATA_DebugMonitorPtr    0x820007F4u
+#define T_DATA_DeviceTable        0u
+#define T_DATA_ClientStates       0x824C3C24u
+#define T_CLIENT_STRIDE           0x000FDC00u
+#define T_CLIENT_VALID            13260u
+#define T_CLIENT_ORIGIN           437312u
+#define T_CLIENT_ANGLES           453512u
+
+#else
+
+#define MW2_TITLE_NAME  "campaign, disc version"
+#define T_ENTRY_POINT   0x82370938u
+#define T_D3D_Present          820C3390
+#define T_D3D_ArenaWait        820B9800
+#define T_D3D_ReplayRecording  820C6130
+#define T_D3D_InitPixelShader  820B8B58
+#define T_D3D_InitVertexShader 820B8E78
+#define T_Job_WaitPredicate    823B7840
+#define T_Com_Error            822830E8
+#define T_Com_Printf           82280900
+#define T_Cbuf_AddText         8227CF18
+#define T_DB_MissingAsset      82172340
+#define T_Memcard_InitializeSystem 8230DF88
+#define T_Image_FlushMove      823A52F8
+#define T_DATA_TimeStampBundlePtr 0x82000780u
+#define T_DATA_DebugMonitorPtr    0x820007F8u
+#define T_DATA_DeviceTable        0x83A53020u
 #define T_DATA_ClientStates       0u
 #define T_CLIENT_STRIDE           0u
 #define T_CLIENT_VALID            0u

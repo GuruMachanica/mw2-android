@@ -45,3 +45,9 @@ ppc_mp/
 build-mp/
 build-mp-release/
 config/mw2mp_switch_tables.toml
+
+# ---- the disc version's derived files (VERSION=tu0 ./build.sh) ----
+ppc_tu0/
+ppc_mp_tu0/
+build*-tu0/
+config/*_switch_tables.tu0.toml

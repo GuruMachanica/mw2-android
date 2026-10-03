@@ -80,19 +80,18 @@ physical heap, since everything the GPU is handed comes from there.
 
 `main.cpp` gets the image one of two ways (`runtime/install/`):
 
-- **A player's start** (no arguments, or `--install <iso or folder>`): the
-  executable works from its own folder. If `game/<xex>` is missing it asks for
-  the disc image in the desktop's file dialog (or takes the one given to
-  `--install`) and copies the fastfiles (`.ff`), the image archives (`.pak`),
-  the movies (`.bik`) and both executables into `game/`, executables last, so
-  an executable present means a finished install. It then reads
-  `game/default.xex` or `game/default_mp.xex`, refuses it unless its SHA-256
-  matches the one CMake baked in from `mw2/` (another region or a title update
-  has other code at other addresses), and decrypts and decompresses the XEX2 in memory at every
-  launch (`install/xex.cpp`, `install/crypto.cpp`).
+- **A player's start** (no arguments): the executable works from its own
+  folder. It reads `game/default.xex` or `game/default_mp.xex` and takes it
+  only if its SHA-256 is the one CMake baked in from `mw2/` (another region or
+  another version has other code at other addresses), then decrypts and
+  decompresses the XEX2 in memory, where it has either (`install/xex.cpp`,
+  `install/crypto.cpp`). With no such executable there -- nothing installed,
+  or an install of another version -- it starts `mw2-launcher` beside it and
+  ends; installing is the launcher's ([building.md](building.md#the-launcher)).
 - **A development run** names the image and the game folder:
-  `./build/mw2 mw2/default.pe mw2/game`. The image may be the flat PE that
-  `tools/xexdump.py` writes or the XEX itself, decrypted on the way in.
+  `./build/mw2 mw2/default.pe mw2/game`. The image is the flat PE that
+  `tools/xexdump.py` writes; the disc version also takes the disc's XEX
+  itself, decrypted on the way in.
 
 The image is copied to `PPC_IMAGE_BASE`, and every recompiled function from
 `PPCFuncMappings` is written into the function table, so an indirect call

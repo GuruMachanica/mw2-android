@@ -22,8 +22,8 @@ Activision's servers). Special Ops is untested.
 
 ## Requirements
 
-- An ISO of the Xbox 360 disc, version 1.0.557 (as on the main menu; title
-  updates can't be used). The installer checks it.
+- An ISO of the Xbox 360 disc, version 1.0.557 (USA/Europe). The launcher
+  checks it, and downloads title update 6 itself.
 - Linux or Windows, 64-bit
 - A Vulkan 1.2 GPU
 - 8 GB of disk space
@@ -33,11 +33,14 @@ Activision's servers). Special Ops is untested.
 
 1. Download `steam` or `lan` for your system from the
    [releases](../../releases/latest), and extract it anywhere.
-2. Start `mw2-sp` (campaign) or `mw2-mp` (multiplayer). The first time, it
-   asks for your ISO and copies the game files into `game/` beside it.
+2. Start `mw2-launcher` and choose INSTALL GAME. It asks for your ISO, copies
+   the game files into `game/` beside it and applies title update 6.
+3. PLAY CAMPAIGN and PLAY MULTIPLAYER start the game; so do `mw2-sp` and
+   `mw2-mp` directly.
 
-From a terminal: `./mw2-mp --install path/to/game.iso` (an extracted disc
-folder works too).
+From a terminal: `./mw2-launcher --install path/to/game.iso` (an extracted
+disc folder works too). If the update can't be downloaded, the launcher says
+where to get it and takes the file (`--update <file>`).
 
 Saves go in `saves/` beside the executables.
 

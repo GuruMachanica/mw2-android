@@ -59,7 +59,7 @@ bool install::xex::Image(const std::vector<uint8_t>& file, std::vector<uint8_t>&
     const uint32_t formatSize = Be32(file, at);
     const uint16_t encryption = Be16(file, at + 4);
     const uint16_t compression = Be16(file, at + 6);
-    if (compression != 1) { error = "the XEX uses a compression the disc does not (" + std::to_string(compression) + ")"; return false; }
+    if (compression > 1) { error = "the XEX uses a compression neither the disc nor an update does (" + std::to_string(compression) + ")"; return false; }
     if (encryption > 1) { error = "the XEX uses an unknown encryption"; return false; }
 
     // The payload, padded to whole AES blocks, as tools/xexdump.py does.
@@ -73,10 +73,12 @@ bool install::xex::Image(const std::vector<uint8_t>& file, std::vector<uint8_t>&
         crypto::Aes128CbcDecrypt(session, data.data(), data.size());
     }
 
-    // Basic compression: runs of data, each followed by a run of zeros.
     image.clear();
+    // An executable a title update was applied to is stored as it is.
+    if (compression == 0) image.assign(file.begin() + dataOffset, file.end());
+    // Basic compression: runs of data, each followed by a run of zeros.
     size_t read = 0;
-    for (uint32_t block = 8; block + 8 <= formatSize; block += 8)
+    for (uint32_t block = 8; compression == 1 && block + 8 <= formatSize; block += 8)
     {
         const uint32_t size = Be32(file, at + block), zeros = Be32(file, at + block + 4);
         if (read + size > data.size()) { error = "the XEX is shorter than its blocks say"; return false; }

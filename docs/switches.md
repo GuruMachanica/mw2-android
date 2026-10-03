@@ -12,7 +12,7 @@ them as unset whatever the environment says, and also drops the keys `F7`,
 
 | switch | | effect |
 |---|---|---|
-| `MW2_WINDOW=0\|1` | R | opens the window. A release build opens it unless `MW2_WINDOW=0`; a diagnostic build only with `MW2_WINDOW=1`. Closing it ends the run as `MW2_RUN_SECONDS` does, with the reports. The frame keeps its proportions in any window shape |
+| `MW2_WINDOW=0\|1` | R | the window, which every build opens; `MW2_WINDOW=0` keeps it shut, for a headless run. Closing it ends the run as `MW2_RUN_SECONDS` does, with the reports. The frame keeps its proportions in any window shape |
 | `MW2_FULLSCREEN=1` | R | starts fullscreen, borderless at the desktop's resolution. `F8` toggles it |
 | `MW2_LOG_FILE=<path>` | R | writes the log there, creating its folder. The log goes to stderr, so `> file` does not catch it |
 | `MW2_LOG_TIME=1` | | stamps every log line with the time since start |

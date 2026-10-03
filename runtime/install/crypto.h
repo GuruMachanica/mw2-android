@@ -1,5 +1,5 @@
 #pragma once
-// The two primitives the installer needs: AES-128 to decrypt an XEX, and
+// The two primitives a start and an install need: AES-128 to decrypt an XEX, and
 // SHA-256 to tell the disc this build was made from from any other.
 #include <array>
 #include <cstddef>

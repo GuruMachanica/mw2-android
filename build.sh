@@ -14,9 +14,16 @@
 #   folder; cmake/mingw-w64.cmake) into a -win directory: build-win/, ...
 #   BUILD_DIR=<dir> builds there instead. REGENERATE=0 keeps the recompiled
 #   tree already there, for a second build of the same title (another ONLINE).
-#   Without the ISO, mw2/default.xex and mw2/default_mp.xex are enough to build;
-#   the game data is only extracted when the ISO is there. CMAKE_EXTRA is
-#   passed to the configure step (a compiler launcher, for instance).
+#   The game is built from title update 6: the disc's executables go in
+#   mw2/tu0/, the update's files in mw2/update/, and the executables the
+#   update makes of the disc's in mw2/. TU=<the update's package, or a folder
+#   with its files> is needed until mw2/update/ has them.
+#   VERSION=tu0 builds the disc's own executables instead, everything of theirs
+#   named for it: mw2/tu0/, ppc_tu0/, ppc_mp_tu0/, config/*.tu0.toml, build*-tu0/.
+#   Without the ISO, mw2/tu0/default.xex and mw2/tu0/default_mp.xex are enough
+#   to build; the game data is only extracted when the ISO is there.
+#   CMAKE_EXTRA is passed to the configure step (a compiler launcher, for
+#   instance).
 set -e
 ROOT=$(cd "$(dirname "$0")" && pwd)
 cd "$ROOT"
@@ -29,6 +36,16 @@ case "$TITLE" in
     *)  echo "TITLE must be sp or mp, not '$TITLE'"; exit 1 ;;
 esac
 export MW2_TITLE=$TITLE
+VERSION=${VERSION:-tu6}
+DISC=mw2/tu0        # the disc's executables, which the update patches
+UPDATE=mw2/update   # the update's files
+MW2=mw2
+case "$VERSION" in
+    tu6) ;;
+    tu0) MW2=$DISC; TOML=${TOML/.toml/.$VERSION.toml}; TABLES=${TABLES/.toml/.$VERSION.toml}; PPC=${PPC}_$VERSION ;;
+    *)   echo "VERSION must be tu6 or tu0, not '$VERSION'"; exit 1 ;;
+esac
+export MW2_VERSION=$VERSION
 DIAGNOSTICS=ON
 PORTABLE=OFF
 if [ -n "$RELEASE" ] && [ "$RELEASE" != 0 ]; then BUILD=$BUILD-release; DIAGNOSTICS=OFF; PORTABLE=ON; fi
@@ -40,6 +57,7 @@ if [ -n "$WINDOWS" ] && [ "$WINDOWS" != 0 ]; then
     TOOLCHAIN="-DCMAKE_TOOLCHAIN_FILE=$ROOT/cmake/mingw-w64.cmake -DLLVM_MINGW=$LLVM_MINGW"
     EXE=mw2.exe
 fi
+[ "$VERSION" = tu6 ] || BUILD=$BUILD-$VERSION
 BUILD=${BUILD_DIR:-$BUILD}
 
 XENON_COMMIT=ddd128bcca99fe8bfbb99bea583c972351fa6ace
@@ -61,10 +79,10 @@ cmake -B XenonRecomp/build -S XenonRecomp -G Ninja -DCMAKE_BUILD_TYPE=Release \
 cmake --build XenonRecomp/build -j"$(nproc)" >/dev/null
 
 echo "==> 3. extract the executables from the ISO (XDVDFS)"
-mkdir -p mw2
-if [ ! -f mw2/default.xex ] || [ ! -f mw2/default_mp.xex ]; then
-    [ -f "$ISO" ] || { echo "no ISO at $ISO, and no mw2/default.xex + mw2/default_mp.xex: set ISO=..."; exit 1; }
-    python3 tools/xdvdfs.py "$ISO" mw2 default.xex default_mp.xex
+mkdir -p $DISC
+if [ ! -f $DISC/default.xex ] || [ ! -f $DISC/default_mp.xex ]; then
+    [ -f "$ISO" ] || { echo "no ISO at $ISO, and no $DISC/default.xex + $DISC/default_mp.xex: set ISO=..."; exit 1; }
+    python3 tools/xdvdfs.py "$ISO" $DISC default.xex default_mp.xex
 fi
 
 # Every fastfile on the disc, ~5.9 GB with the .pak archives beside them. A
@@ -95,14 +113,45 @@ EOF
 fi
 echo "    $(ls mw2/game | wc -l) files in mw2/game"
 
+if [ "$VERSION" = tu6 ]; then
+    echo "==> 3b. apply the title update"
+    mkdir -p $UPDATE
+    if [ ! -f $UPDATE/default.xexp ] || [ ! -f $UPDATE/default_mp.xexp ]; then
+        [ -e "$TU" ] || { echo "no $UPDATE/default.xexp: set TU=<the update's package, or a folder with its files>"; exit 1; }
+        if [ -d "$TU" ]; then cp "$TU"/*.xexp "$TU"/*.ff $UPDATE/; else python3 tools/stfs.py "$TU" $UPDATE >/dev/null; fi
+    fi
+    # XenonRecomp's own patcher, from the command line: XenonAnalyse reads the
+    # patched executable before XenonRecomp would make it.
+    if [ ! -x XenonRecomp/build/xexpatch ]; then
+        clang++-18 -std=c++20 -O1 -IXenonRecomp/XenonUtils -IXenonRecomp/thirdparty/simde tools/xexpatch.cpp \
+            XenonRecomp/build/XenonUtils/libXenonUtils.a XenonRecomp/build/thirdparty/disasm/libdisasm.a \
+            -o XenonRecomp/build/xexpatch
+    fi
+    for x in default default_mp; do
+        [ -f mw2/$x.xex ] || ./XenonRecomp/build/xexpatch $DISC/$x.xex $UPDATE/$x.xexp mw2/$x.xex
+    done
+    # The update's fastfiles go with the disc's.
+    for f in $UPDATE/*.ff; do [ ! -e "$f" ] || [ -e "mw2/game/$(basename "$f")" ] || cp "$f" mw2/game/; done
+    echo "    $(ls mw2/game | wc -l) files in mw2/game"
+else
+    # The disc's executables get a game folder without the update's fastfiles:
+    # the disc's multiplayer would load a patch_mp.ff it found.
+    mkdir -p $DISC/game
+    for f in mw2/game/*; do
+        name=$(basename "$f")
+        [ ! -e "$f" ] || [ -e "$UPDATE/$name" ] || [ -e "$DISC/game/$name" ] || ln -s "../../game/$name" "$DISC/game/"
+    done
+    echo "    $(ls $DISC/game | wc -l) files in $DISC/game"
+fi
+
 echo "==> 4. decrypt/decompress XEX -> flat PE memory image (for analysis)"
-[ -f mw2/$PE ] || python3 tools/xexdump.py mw2/$XEX mw2/$PE
+[ -f $MW2/$PE ] || python3 tools/xexdump.py $MW2/$XEX $MW2/$PE
 
 if [ "${REGENERATE:-1}" = 0 ] && [ -f $PPC/ppc_func_mapping.cpp ]; then
 echo "==> 5-7. keeping the recompiled tree in $PPC/"
 else
 echo "==> 5. detect jump tables"
-./XenonRecomp/build/XenonAnalyse/XenonAnalyse mw2/$XEX $TABLES
+./XenonRecomp/build/XenonAnalyse/XenonAnalyse $MW2/$XEX $TABLES
 echo "    tables: $(grep -c '^\[\[switch\]\]' $TABLES)"
 
 echo "==> 6. recompile PPC -> C++"
@@ -123,11 +172,12 @@ FETCHED=""
 if [ "$BUILD" != build ]; then
     [ -d build/_deps/sdl3-src ]       && FETCHED="$FETCHED -DFETCHCONTENT_SOURCE_DIR_SDL3=$ROOT/build/_deps/sdl3-src"
     [ -d build/_deps/ffmpeg_xma-src ] && FETCHED="$FETCHED -DFETCHCONTENT_SOURCE_DIR_FFMPEG_XMA=$ROOT/build/_deps/ffmpeg_xma-src"
+    [ -d build/_deps/imgui-src ]      && FETCHED="$FETCHED -DFETCHCONTENT_SOURCE_DIR_IMGUI=$ROOT/build/_deps/imgui-src"
 fi
-cmake -B $BUILD -G Ninja -DCMAKE_BUILD_TYPE=Release -DMW2_TITLE=$TITLE -DMW2_DIAGNOSTICS=$DIAGNOSTICS -DMW2_ONLINE=${ONLINE:-none} -DMW2_PORTABLE=$PORTABLE $FETCHED $CMAKE_EXTRA \
+cmake -B $BUILD -G Ninja -DCMAKE_BUILD_TYPE=Release -DMW2_TITLE=$TITLE -DMW2_VERSION=$VERSION -DMW2_DIAGNOSTICS=$DIAGNOSTICS -DMW2_ONLINE=${ONLINE:-none} -DMW2_PORTABLE=$PORTABLE $FETCHED $CMAKE_EXTRA \
       $TOOLCHAIN >/dev/null
 cmake --build $BUILD -j"$(nproc)"
 ls -la $BUILD/$EXE
 
 echo
-echo "run it with:  MW2_WATCHDOG=10 ./$BUILD/mw2 mw2/$PE mw2/game"
+echo "run it with:  ./$BUILD/$EXE $MW2/$PE $MW2/game"

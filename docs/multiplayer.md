@@ -20,6 +20,10 @@ hooks.
 | generated C++ | `ppc/` | `ppc_mp/` |
 | build directory | `build/` (`build-release/`) | `build-mp/` (`build-mp-release/`) |
 
+Both are the executables title update 6 makes of the disc's; the disc's own
+are a build option with names of their own
+([building.md](building.md#the-disc-version)).
+
 `build.sh` takes `TITLE=sp` (the default) or `TITLE=mp`. CMake takes
 `-DMW2_TITLE=sp|mp`, which selects the recompiled tree and, for `mp`, defines
 `MW2_TITLE_MP`. The Python tools make the same choice through the `MW2_TITLE`
@@ -70,7 +74,7 @@ A unique match of a different size needs reading before it is trusted.
 
 **Every fastfile.** The campaign loads the level it is told to; the multiplayer
 chooses its own map and zones. A zone whose file is missing makes the title
-report a dirty disc and fail, so `build.sh` and the installer extract every
+report a dirty disc and fail, so `build.sh` and the launcher extract every
 `.ff` and `.pak` on the disc (about 5.9 GB), and the campaign's Bink movies
 beside them ([gameplay.md](gameplay.md#movies)); the multiplayer plays none.
 

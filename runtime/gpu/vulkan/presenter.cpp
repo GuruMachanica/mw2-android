@@ -872,10 +872,9 @@ namespace
 
 bool vk::Start()
 {
-    // A release build is for playing and opens it. A diagnostics build leaves it
-    // shut, for headless measurement runs, unless MW2_WINDOW=1. MW2_WINDOW=0
-    // keeps either shut.
-    const bool window = env::Text("MW2_WINDOW") ? env::Flag("MW2_WINDOW") : !diag::kOn;
+    // Every build opens it; MW2_WINDOW=0 keeps it shut, for a headless
+    // measurement run.
+    const bool window = !env::Text("MW2_WINDOW") || env::Flag("MW2_WINDOW");
     if (!window) return false;
 
     g.running = true;

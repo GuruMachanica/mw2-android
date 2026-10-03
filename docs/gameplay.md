@@ -11,7 +11,7 @@ onto that one flat directory.
 
 | files | status |
 |---|---|
-| `.ff` fastfiles, `.pak` image archives, `.bik` Bink movies | all of them are extracted, by `build.sh` from the ISO or by the installer (`runtime/install/`) |
+| `.ff` fastfiles, `.pak` image archives, `.bik` Bink movies | all of them are extracted, by `build.sh` from the ISO or by the launcher (`launcher/`) |
 
 Every fastfile is needed, not only the current level's: a zone whose file is
 missing makes the title report a dirty disc and fail, and the multiplayer picks

@@ -7,7 +7,11 @@ of them -- the flat image, the recompiled C++, the switch tables, the build
 directory -- lives beside the other's under its own name, so both builds can
 exist at once.
 
-The image's section table is read here rather than hard-coded, because the two
+MW2_VERSION=tu6 (the default) is the executable title update 6 makes of the
+disc's, under the names below. MW2_VERSION=tu0 is the disc's own, whose files
+carry the version in their names: mw2/tu0/, ppc_tu0/, config/MW2.tu0.toml.
+
+The image's section table is read here rather than hard-coded, because the
 executables lay their sections out differently.
 """
 import os, struct
@@ -21,6 +25,19 @@ TITLES = {
     "mp": dict(xex="mw2/default_mp.xex", image="mw2/default_mp.pe", ppc="ppc_mp",
                toml="config/MW2MP.toml", tables="config/mw2mp_switch_tables.toml", build="build-mp"),
 }
+
+VERSIONS = ("tu6", "tu0")
+VERSION = os.environ.get("MW2_VERSION", "tu6")
+if VERSION not in VERSIONS:
+    raise SystemExit(f"MW2_VERSION={VERSION!r}: expected one of {', '.join(VERSIONS)}")
+if VERSION != "tu6":
+    TITLES = {name: dict(xex=t["xex"].replace("mw2/", f"mw2/{VERSION}/"),
+                         image=t["image"].replace("mw2/", f"mw2/{VERSION}/"),
+                         ppc=f"{t['ppc']}_{VERSION}",
+                         toml=t["toml"].replace(".toml", f".{VERSION}.toml"),
+                         tables=t["tables"].replace(".toml", f".{VERSION}.toml"),
+                         build=f"{t['build']}-{VERSION}")
+              for name, t in TITLES.items()}
 
 NAME = os.environ.get("MW2_TITLE", "sp")
 if NAME not in TITLES:
