@@ -7,3 +7,6 @@ extern const unsigned char kFontHeading[];  // Barlow Condensed Medium
 extern const unsigned kFontHeadingSize;
 extern const unsigned char kFontBody[];     // Barlow Semi Condensed
 extern const unsigned kFontBodySize;
+// The window's icon, a BMP (launcher/icon/, tools/launcher_icon.py).
+extern const unsigned char kIcon[];
+extern const unsigned kIconSize;

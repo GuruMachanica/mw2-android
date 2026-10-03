@@ -257,6 +257,15 @@ if(MW2_USE_SDL)
         string(APPEND fonts_text "extern const unsigned char kFont${font_name}[] = { ${font_bytes} };\n"
                                  "extern const unsigned kFont${font_name}Size = ${font_size};\n")
     endforeach()
+    # The window's icon the same way (tools/launcher_icon.py makes it).
+    set(icon_path "${CMAKE_SOURCE_DIR}/launcher/icon/launcher.bmp")
+    set_property(DIRECTORY APPEND PROPERTY CMAKE_CONFIGURE_DEPENDS "${icon_path}")
+    file(READ "${icon_path}" icon_hex HEX)
+    string(LENGTH "${icon_hex}" icon_length)
+    math(EXPR icon_size "${icon_length} / 2")
+    string(REGEX REPLACE "([0-9a-f][0-9a-f])" "0x\\1," icon_bytes "${icon_hex}")
+    string(APPEND fonts_text "extern const unsigned char kIcon[] = { ${icon_bytes} };\n"
+                             "extern const unsigned kIconSize = ${icon_size};\n")
     file(GENERATE OUTPUT "${MW2_FONTS_SOURCE}" CONTENT "${fonts_text}")
 
     set(XENON "${CMAKE_SOURCE_DIR}/XenonRecomp")
@@ -284,6 +293,9 @@ if(MW2_USE_SDL)
     target_compile_definitions(launcher PRIVATE ${MW2_HASH_DEFINITIONS} NOMINMAX)
     target_link_libraries(launcher PRIVATE SDL3::SDL3-static)
     if(WIN32)
+        # The program's icon, as Explorer and the taskbar show it.
+        enable_language(RC)
+        target_sources(launcher PRIVATE "${CMAKE_SOURCE_DIR}/launcher/icon/launcher.rc")
         target_include_directories(launcher PRIVATE "${CMAKE_SOURCE_DIR}/launcher/compat")
         target_link_libraries(launcher PRIVATE urlmon)
         target_link_options(launcher PRIVATE -static)

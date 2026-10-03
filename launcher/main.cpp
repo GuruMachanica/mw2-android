@@ -8,6 +8,7 @@
 //
 // With no <disc>, --install brings the install already in game/ up to date.
 #include "disc.h"
+#include "fonts.h"
 #include "setup.h"
 #include "ui.h"
 
@@ -334,6 +335,11 @@ namespace
         {
             SDL_ShowSimpleMessageBox(SDL_MESSAGEBOX_ERROR, "Modern Warfare 2", SDL_GetError(), nullptr);
             return 1;
+        }
+        if (SDL_Surface* icon = SDL_LoadBMP_IO(SDL_IOFromConstMem(kIcon, kIconSize), true))
+        {
+            SDL_SetWindowIcon(app.window, icon);
+            SDL_DestroySurface(icon);
         }
         SDL_SetRenderVSync(renderer, 1);
 

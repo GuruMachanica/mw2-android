@@ -154,6 +154,12 @@ renderer, three fonts from `third_party/fonts/` written out as arrays at
 configure time, and XenonRecomp's patcher compiled in from its checkout with
 the LZX decoder and AES it uses.
 
+Its icon is in `launcher/icon/`: `launcher.ico` is linked into the Windows
+program as a resource, and `launcher.bmp` is written out as an array like the
+fonts and given to the window on both systems. `tools/launcher_icon.py` makes
+the two from the campaign's icon in the PC game's `iw4sp.exe`: the left half as
+it is, the right half in the multiplayer's colours.
+
 | file | what |
 |---|---|
 | `main.cpp` | the window's loop, what each entry does, the file dialog and dropped files, and the terminal mode |
