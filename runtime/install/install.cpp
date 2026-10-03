@@ -4,6 +4,7 @@
 #include "../log.h"
 
 #include <cstdio>
+#include <cstdlib>
 #include <cstring>
 #include <fstream>
 #include <string>
@@ -82,6 +83,23 @@ namespace
 #endif
     }
 
+    // The program of each of the title's executables, beside this one.
+    const char* ProgramFor(const std::string& xex)
+    {
+#ifdef _WIN32
+        if (xex == "default.xex") return "mw2-sp.exe";
+        if (xex == "default_mp.xex") return "mw2-mp.exe";
+#else
+        if (xex == "default.xex") return "mw2-sp";
+        if (xex == "default_mp.xex") return "mw2-mp";
+#endif
+        return nullptr;
+    }
+
+    constexpr const char* kLaunchDataVariable = "MW2_LAUNCH_DATA";
+    bool g_playerStart = false;
+    std::string g_nextTitle;
+
     enum class Installed { Yes, No, Unreadable };
 
     // The title's image from game/, if the executable there is the one this
@@ -115,6 +133,7 @@ bool install::PlayerStart(int argc, char**)
 bool install::Prepare(int, char**, Launch& launch, int& exitCode)
 {
     exitCode = 1;
+    g_playerStart = true;
     // Everything a player's copy keeps -- game/, saves/ -- is beside the executable.
     std::error_code ec;
     if (const fs::path folder = ExecutableFolder(); !folder.empty()) fs::current_path(folder, ec);
@@ -152,4 +171,63 @@ bool install::LoadImageFile(const fs::path& path, std::vector<uint8_t>& image)
     }
     image = std::move(file);
     return true;
+}
+
+std::vector<uint8_t>& install::LaunchData()
+{
+    static std::vector<uint8_t> data = [] {
+        std::vector<uint8_t> bytes;
+        const char* hex = std::getenv(kLaunchDataVariable);
+        for (; hex && hex[0] && hex[1]; hex += 2)
+        {
+            unsigned value = 0;
+            if (std::sscanf(hex, "%2x", &value) != 1) return std::vector<uint8_t>{};
+            bytes.push_back(uint8_t(value));
+        }
+        return bytes;
+    }();
+    return data;
+}
+
+void install::SetNextTitle(const std::string& xex) { g_nextTitle = xex; }
+
+void install::StartNextTitle()
+{
+    if (g_nextTitle.empty()) return;
+    const char* program = ProgramFor(g_nextTitle);
+    if (!program) { LOGE("the title asked for %s, which is not one of its executables", g_nextTitle.c_str()); return; }
+    // A development run was given its image and game folder by hand, and
+    // nothing says where the other title's are.
+    if (!g_playerStart)
+    {
+        LOGW("the title asked for %s: start that build yourself, a development run does not", g_nextTitle.c_str());
+        return;
+    }
+#ifdef MW2_USE_SDL
+    std::error_code ec;
+    const fs::path file = fs::absolute(program, ec);
+    if (!fs::is_regular_file(file, ec)) { ShowError(std::string(program) + " is not beside this program."); return; }
+    std::string hex;
+    for (const uint8_t byte : LaunchData())
+    {
+        char text[3];
+        std::snprintf(text, sizeof(text), "%02x", byte);
+        hex += text;
+    }
+    SDL_Environment* environment = SDL_GetEnvironment();
+    if (hex.empty()) SDL_UnsetEnvironmentVariable(environment, kLaunchDataVariable);
+    else SDL_SetEnvironmentVariable(environment, kLaunchDataVariable, hex.c_str(), true);
+    const std::string path = Utf8(file);
+    const char* const args[] = { path.c_str(), nullptr };
+    SDL_PropertiesID properties = SDL_CreateProperties();
+    SDL_SetPointerProperty(properties, SDL_PROP_PROCESS_CREATE_ARGS_POINTER, const_cast<char**>(args));
+    SDL_SetPointerProperty(properties, SDL_PROP_PROCESS_CREATE_ENVIRONMENT_POINTER, environment);
+    SDL_Process* process = SDL_CreateProcessWithProperties(properties);
+    SDL_DestroyProperties(properties);
+    if (!process) { ShowError("cannot start " + path + ": " + SDL_GetError()); return; }
+    SDL_DestroyProcess(process);
+    LOGI("started %s", path.c_str());
+#else
+    LOGE("this build cannot start %s", program);
+#endif
 }

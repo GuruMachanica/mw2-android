@@ -59,6 +59,7 @@ void crash::RequestExit(const char* why)
         LOGI("exiting: %s", why);
         gpu::Shutdown();
         ReportAll();
+        install::StartNextTitle();
         std::fflush(nullptr);
         _exit(0);
     }).detach();

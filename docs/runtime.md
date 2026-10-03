@@ -93,6 +93,16 @@ physical heap, since everything the GPU is handed comes from there.
   `tools/xexdump.py` writes; the disc version also takes the disc's XEX
   itself, decrypted on the way in.
 
+The campaign and the multiplayer are two executables, and the title's menus
+go from one to the other with `XamLoaderLaunchTitle`, after leaving what the
+other should know with `XamLoaderSetLaunchData` (1000 bytes it reads back at
+its own start). Here they are two programs: the call ends the run, and once
+the window and the sound are let go it starts `mw2-sp` or `mw2-mp` beside the
+running one, with the launch data in the `MW2_LAUNCH_DATA` environment
+variable (`kernel/misc.cpp`, `install/install.cpp`). A development run only
+logs the request, since nothing tells it where the other build and its image
+are.
+
 The image is copied to `PPC_IMAGE_BASE`, and every recompiled function from
 `PPCFuncMappings` is written into the function table, so an indirect call
 finds its target with `PPC_LOOKUP_FUNC`. The main thread then gets a 1 MB guest
