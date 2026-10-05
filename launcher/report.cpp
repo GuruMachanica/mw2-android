@@ -223,13 +223,27 @@ bool report::Start(const char* program, std::string& error)
     return true;
 }
 
-bool report::Make(const char* what, Made& made, std::string& error)
+bool report::Pending()
+{
+    std::error_code ec;
+    return fs::is_regular_file(kLog, ec);
+}
+
+void report::Discard()
+{
+    std::error_code ec;
+    fs::remove(kLog, ec);
+}
+
+bool report::Make(Made& made, std::string& error)
 {
     std::ifstream raw(kLog, std::ios::binary);
     if (!raw) { error = "The game left no log, so there is nothing to report. Did it start?"; return false; }
     const std::string log = Scrub(raw);
     raw.close();
 
+    // The log's first line says which game wrote it.
+    const char* what = log.find("runtime (multiplayer") < log.find('\n') ? "Multiplayer" : "Campaign";
     const bool fault = log.find("[E] ----") != std::string::npos;
     std::string version = *update::Current() ? update::Current() : "a development build";
     if (*update::Kind()) version += std::string(" ") + update::Kind();

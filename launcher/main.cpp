@@ -190,6 +190,8 @@ namespace
         CheckUpdate, InstallUpdate,
         // The bug report screen: a run of either game with its log kept.
         Report, ReportCampaign, ReportMultiplayer,
+        // The question a start asks when a recorded run was never reported.
+        SendPending, DiscardPending,
     };
 
     struct Entry
@@ -228,7 +230,8 @@ namespace
         std::string updated;            // the version this start is the first of
         bool gameRunning = false;       // looked up once a second while the profile screen shows
         bool reportScreen = false;
-        const char* recording = nullptr;    // "Campaign" or "Multiplayer" while the reported run goes on
+        bool recording = false;         // the reported run goes on
+        bool pendingReport = false;     // a recorded run was never reported: the start asks about it
         std::chrono::steady_clock::time_point recordingSince{};
         std::chrono::steady_clock::time_point gameChecked{};
         int focus = 0;
@@ -330,7 +333,7 @@ namespace
                 }
                 else if (report::Start(action == Action::ReportCampaign ? kCampaign : kMultiplayer, message))
                 {
-                    recording = action == Action::ReportCampaign ? "Campaign" : "Multiplayer";
+                    recording = true;
                     recordingSince = std::chrono::steady_clock::now();
                     message.clear();
                     focusPlaced = false;
@@ -350,6 +353,16 @@ namespace
                 focusPlaced = false;
                 player = 0;
                 ReadProfile();
+                break;
+            case Action::SendPending:
+                pendingReport = false;
+                reportScreen = true;
+                FinishReport();
+                break;
+            case Action::DiscardPending:
+                pendingReport = false;
+                report::Discard();
+                focusPlaced = false;
                 break;
             case Action::NextPlayer:
                 player = (player + 1) % players.size();
@@ -459,11 +472,10 @@ namespace
         void FinishReport()
         {
             report::Made made;
-            const char* what = recording;
-            recording = nullptr;
+            recording = false;
             focusPlaced = false;
             messageFocus = -1;
-            messageIsError = !report::Make(what, made, message);
+            messageIsError = !report::Make(made, message);
             if (messageIsError) return;
             const std::string file = Utf8(made.file);
             message = report::Open(made)
@@ -609,6 +621,22 @@ namespace
 
         std::vector<Entry> Entries() const
         {
+            if (pendingReport)
+            {
+                // The launcher was ended with the game, as Steam's "Exit game" does.
+                std::vector<Entry> entries(2);
+                entries[0].shown.label = "YES";
+                entries[0].action = Action::SendPending;
+                entries[1].shown.label = "NO";
+                entries[1].action = Action::DiscardPending;
+                for (Entry& entry : entries)
+                {
+                    entry.heading = "A BUG REPORT WASN'T SENT";
+                    entry.text = "The game was recorded for a bug report, and the report was not sent. Send it now?\n\n"
+                                 "YES makes the report and opens the page to send it on. NO throws the recording away.";
+                }
+                return entries;
+            }
             if (profileScreen) return ProfileEntries();
             if (reportScreen) return ReportEntries();
             std::vector<Entry> entries;
@@ -716,6 +744,7 @@ namespace
 
         app.state = setup::Detect();
         app.updated = updated;
+        app.pendingReport = report::Pending() && !GameRunning();
         while (!app.quit)
         {
             SDL_Event event;

@@ -23,8 +23,13 @@ namespace report
         std::filesystem::path file;     // the report
         std::string page;               // the new-issue page's address, filled in
     };
-    // After the game has ended. `what` is "Campaign" or "Multiplayer".
-    bool Make(const char* what, Made& made, std::string& error);
+    // Whether a run was recorded and no report made of it: the launcher was
+    // ended with the game, as Steam's "Exit game" does on a Steam Deck.
+    bool Pending();
+    // Forgets that run.
+    void Discard();
+    // After the game has ended.
+    bool Make(Made& made, std::string& error);
     // Shows the page and the folder holding the file. False when the browser
     // could not be opened.
     bool Open(const Made& made);

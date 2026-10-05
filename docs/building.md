@@ -243,6 +243,12 @@ the folder with the file beside it: the launcher
 has no account to file an issue with and a page cannot be handed a file, so
 the player drags it in.
 
+The game ends cleanly when it is told to from outside, so its summary is
+written. The launcher may be ended along with it (Steam's "Exit game", the
+only way out on a Steam Deck in Gaming Mode): the log is then still there,
+and the next start of the launcher asks whether to send it: YES makes the
+report from it, NO deletes it.
+
 ## Windows
 
 `WINDOWS=1 TITLE=mp RELEASE=1 LLVM_MINGW=<dir> ./build.sh` produces
