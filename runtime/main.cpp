@@ -17,6 +17,7 @@
 #include "watchpoint.h"
 #include "install/install.h"
 #include "platform.h"
+#include "report.h"
 
 #include <unistd.h>
 
@@ -34,6 +35,7 @@
 // same question, so they print the same reports.
 static void ReportAll()
 {
+    report::Write();
     if constexpr (!diag::kOn) return;
     kernel::ReportUnimplemented();
     kernel::ReportMissingFiles();
@@ -156,7 +158,9 @@ int main(int argc, char** argv)
         std::error_code ignored;
         if (const auto folder = std::filesystem::path(logPath).parent_path(); !folder.empty())
             std::filesystem::create_directories(folder, ignored);
-        if (!std::freopen(logPath, "w", stderr))
+        // A title the other one started (from its menus) carries on in the
+        // log of the run it belongs to.
+        if (!std::freopen(logPath, env::Flag("MW2_LOG_APPEND") ? "a" : "w", stderr))
             std::fprintf(stdout, "could not open %s for the log\n", logPath);
         // A line at a time, as stderr is to a terminal: the file is read while
         // the run goes on, and a line held back is a line a watcher never sees.

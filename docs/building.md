@@ -169,6 +169,7 @@ it is, the right half in the multiplayer's colours.
 | `package.cpp` | reads the update's package (STFS), as `tools/stfs.py` does |
 | `download.cpp` | one file over HTTPS: `URLDownloadToFile` on Windows, the `curl` program elsewhere |
 | `update.cpp` | looks for a newer release and puts it in place of the running programs |
+| `report.cpp` | a bug report: a run with its log kept, the system's description, the new-issue page |
 | `profile.cpp` | the profile screen's changes to the files under `saves/` ([saves.md](saves.md#what-the-launcher-changes)) |
 | `playerdata_layout.h` | generated: where the multiplayer's stats file keeps what `profile.cpp` changes |
 
@@ -190,8 +191,8 @@ does the same from a terminal; with no disc it updates the install in place.
 
 The screen is a description (`ui::Frame`) that `main.cpp` fills each frame from
 a list of entries, each with an action and the text the pane shows for it.
-PROFILE swaps the list for its own (`ProfileEntries`); MAPS is an entry
-without an action yet.
+PROFILE and REPORT A BUG swap the list for their own (`ProfileEntries`,
+`ReportEntries`); MAPS is an entry without an action yet.
 PLAY CAMPAIGN and PLAY MULTIPLAYER start `mw2-sp` and `mw2-mp` beside the
 launcher, the names a release gives the two game executables.
 
@@ -220,6 +221,27 @@ the game shows UPDATE GAME as any install of another version does.
 does the same from a terminal. `MW2_UPDATE_URL=<address>` names another
 description of the same form: a mirror's, or a file as `file://` to try an
 update without publishing one.
+
+### Reporting a bug
+
+REPORT A BUG (`report.cpp`) starts the campaign or the multiplayer with
+`MW2_REPORT=1` and `MW2_LOG_FILE=reports/run.log`, and waits for it to end;
+the title one starts from its menus writes on in the same log. In that mode
+the game's log names the graphics driver and ends, at exit or at a fault, with
+how the run performed (`runtime/report.cpp`): the frame rate in play, how the
+frame times spread, and what was compiled in the middle of a draw.
+
+The launcher then writes `reports/mw2-report-<date>-<time>.txt`: the version,
+the system, processor, memory, graphics and displays, the game's own summary,
+and the log. An issue is public, so the log first loses the player's name, IP
+addresses, the session keys of a `connect` line, account numbers, other
+players' names, and the game's and the home folder's paths; the log as the
+game wrote it is deleted. GitHub's new-issue page is opened with the same
+description filled in, in place of the text an issue written by hand starts
+with (`.github/ISSUE_TEMPLATE/issue.md`, which sends people to the launcher), and
+the folder with the file beside it: the launcher
+has no account to file an issue with and a page cannot be handed a file, so
+the player drags it in.
 
 ## Windows
 
@@ -288,6 +310,7 @@ It packages `mw2-launcher` with them, and the fonts' licence.
 | `engine.h`, `engine_log.cpp`, `predicate_waits.cpp`, `console.cpp` | hooks into the engine: print and error paths, spin waits, the console command buffer |
 | `player.cpp` | the headless walker and route recorder |
 | `stutters.cpp`, `pacing_trace.cpp` | the stutter detector and the frame pacing timeline |
+| `report.cpp` | `MW2_REPORT=1`: the driver's name and a run's performance summary, for a bug report |
 | `crash.cpp`, `watchpoint.cpp`, `mmio_hook.h` | the fault handler, the write watchpoint, the hardware-register store hook |
 
 ### Tools

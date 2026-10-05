@@ -11,6 +11,7 @@
 #include "disc.h"
 #include "fonts.h"
 #include "profile.h"
+#include "report.h"
 #include "setup.h"
 #include "ui.h"
 #include "update.h"
@@ -187,6 +188,8 @@ namespace
         // The profile screen and what it does.
         Profile, Back, NextPlayer, MaxRank, Prestige, UnlockEverything, UnlockMissions, AllStars,
         CheckUpdate, InstallUpdate,
+        // The bug report screen: a run of either game with its log kept.
+        Report, ReportCampaign, ReportMultiplayer,
     };
 
     struct Entry
@@ -224,6 +227,9 @@ namespace
         bool newer = false;
         std::string updated;            // the version this start is the first of
         bool gameRunning = false;       // looked up once a second while the profile screen shows
+        bool reportScreen = false;
+        const char* recording = nullptr;    // "Campaign" or "Multiplayer" while the reported run goes on
+        std::chrono::steady_clock::time_point recordingSince{};
         std::chrono::steady_clock::time_point gameChecked{};
         int focus = 0;
         bool focusPlaced = false;
@@ -315,11 +321,30 @@ namespace
                 job->work = [release = release](setup::Progress& progress, std::string& error) { return update::Install(release, progress, error); };
                 job->Start();
                 break;
+            case Action::ReportCampaign:
+            case Action::ReportMultiplayer:
+                if (GameRunning())
+                {
+                    message = "The game is running. Close it first: the report is of a run started here.";
+                    messageIsError = true;
+                }
+                else if (report::Start(action == Action::ReportCampaign ? kCampaign : kMultiplayer, message))
+                {
+                    recording = action == Action::ReportCampaign ? "Campaign" : "Multiplayer";
+                    recordingSince = std::chrono::steady_clock::now();
+                    message.clear();
+                    focusPlaced = false;
+                }
+                else messageIsError = true;
+                messageFocus = focus;
+                break;
             case Action::Profile:
+            case Action::Report:
             case Action::Back:
                 gameRunning = action == Action::Profile && GameRunning();
                 gameChecked = std::chrono::steady_clock::now();
                 profileScreen = action == Action::Profile;
+                reportScreen = action == Action::Report;
                 message.clear();
                 messageIsError = false;
                 focusPlaced = false;
@@ -391,6 +416,61 @@ namespace
             ReadProfile();
             for (size_t i = 0; i < players.size(); i++)
                 if (players[i].file == file) player = i;
+        }
+
+        std::vector<Entry> ReportEntries() const
+        {
+            std::vector<Entry> entries;
+            auto add = [&](Action action, const char* label, const char* heading, std::string text) {
+                Entry entry;
+                entry.shown.label = label;
+                entry.action = action;
+                entry.heading = heading;
+                entry.text = std::move(text);
+                entries.push_back(std::move(entry));
+                return &entries.back();
+            };
+            if (recording)
+            {
+                add(Action::None, "RECORDING", "THE GAME IS RUNNING",
+                    "Play until the problem shows, then quit the game.\n\nThe report is made when the game has closed. "
+                    "If the game closes by itself, that is recorded too.");
+                return entries;
+            }
+            const std::string how =
+                "The game starts and keeps a log of the run. Play until the problem shows, then quit the game.\n\n"
+                "The launcher then writes one report file and opens the project's new-issue page on GitHub with your "
+                "system's description filled in. You describe what happened, drag the file in, and submit. "
+                "That needs a GitHub account.\n\n"
+                "The report is public. Your name, network addresses and folder names are taken out of it.";
+            std::error_code ec;
+            const bool installed = state == setup::State::Installed;
+            Entry* campaign = add(Action::ReportCampaign, "CAMPAIGN", "REPORT A BUG IN THE CAMPAIGN", how);
+            campaign->shown.enabled = installed && fs::is_regular_file(kCampaign, ec);
+            Entry* multiplayer = add(Action::ReportMultiplayer, "MULTIPLAYER", "REPORT A BUG IN THE MULTIPLAYER", how);
+            multiplayer->shown.enabled = installed && fs::is_regular_file(kMultiplayer, ec);
+            for (Entry* entry : { campaign, multiplayer })
+                if (!entry->shown.enabled) { entry->action = Action::None; entry->text = "Install the game first."; }
+            add(Action::Back, "BACK", "", "Reports are kept in the reports folder beside the launcher.")->shown.ruleAbove = true;
+            return entries;
+        }
+
+        // The reported run has ended: the file, the page, and what to do with them.
+        void FinishReport()
+        {
+            report::Made made;
+            const char* what = recording;
+            recording = nullptr;
+            focusPlaced = false;
+            messageFocus = -1;
+            messageIsError = !report::Make(what, made, message);
+            if (messageIsError) return;
+            const std::string file = Utf8(made.file);
+            message = report::Open(made)
+                ? "The report is\n" + file + "\n\nThe issue page has opened in your browser. Describe what happened, "
+                  "drag that file into the text box, and submit."
+                : "The report is\n" + file + "\n\nNo browser could be opened. Attach that file to a new issue at\n"
+                  "github.com/PaulCombal/mw2-recompiled/issues";
         }
 
         std::vector<Entry> ProfileEntries() const
@@ -469,6 +549,14 @@ namespace
             }
             if (forAction != Action::None) Take(forAction, path);
 
+            // Two seconds in, the game has had time to appear among the processes;
+            // the title one starts from its menus is running before it ends itself.
+            if (recording && std::chrono::steady_clock::now() - gameChecked > std::chrono::seconds(1))
+            {
+                gameChecked = std::chrono::steady_clock::now();
+                if (gameChecked - recordingSince > std::chrono::seconds(2) && !GameRunning()) FinishReport();
+            }
+
             if (profileScreen && std::chrono::steady_clock::now() - gameChecked > std::chrono::seconds(1))
             {
                 const bool was = gameRunning;
@@ -522,6 +610,7 @@ namespace
         std::vector<Entry> Entries() const
         {
             if (profileScreen) return ProfileEntries();
+            if (reportScreen) return ReportEntries();
             std::vector<Entry> entries;
             auto add = [&](Action action, std::string label, bool enabled, const char* heading, std::string text) {
                 Entry entry;
@@ -577,11 +666,13 @@ namespace
                 add(Action::InstallUpdate, "UPDATE TO " + release.version, true, "UPDATES",
                     "Version " + release.version + " is out; this is " + update::Current() + ".\n\n"
                     "It is downloaded (" + std::to_string((release.size + 500000) / 1000000) + " MB) and put in place of this one, "
-                    "and the launcher starts again. The game's files and your saves stay as they are.");
+                    "and the launcher starts again. The game's files and your saves stay as they are.")->shown.ruleAbove = true;
             else
                 add(Action::CheckUpdate, "CHECK FOR UPDATES", released, "UPDATES",
                     released ? std::string("Look for a newer version than this one, ") + update::Current() + "."
-                             : std::string("This build was not made as a release, so there is no version to compare."));
+                             : std::string("This build was not made as a release, so there is no version to compare."))->shown.ruleAbove = true;
+            add(Action::Report, "REPORT A BUG", true, "REPORT A BUG",
+                "Something wrong with the game? Send the game's report data to GitHub.\n\nA GitHub account is required.");
             add(Action::Quit, "QUIT", true, "", "")->shown.ruleAbove = true;
             return entries;
         }
@@ -667,7 +758,7 @@ namespace
             app.focus = std::clamp(app.focus, 0, count - 1);
             int chosen = pressed({ ImGuiKey_Enter, ImGuiKey_KeypadEnter, ImGuiKey_Space, ImGuiKey_GamepadFaceDown }, false) ? app.focus : -1;
             if (app.job && pressed({ ImGuiKey_Escape, ImGuiKey_GamepadFaceRight }, false)) app.job->progress.cancel = true;
-            else if (app.profileScreen && pressed({ ImGuiKey_Escape, ImGuiKey_GamepadFaceRight }, false))
+            else if ((app.profileScreen || (app.reportScreen && !app.recording)) && pressed({ ImGuiKey_Escape, ImGuiKey_GamepadFaceRight }, false))
             {
                 app.Do(Action::Back);
                 ImGui::EndFrame();
@@ -695,7 +786,8 @@ namespace
                              : app.job->kind == Job::Kind::InstallUpdate ? "The launcher starts again when it is done."
                                                                          : "Stopping and starting again later carries on where it left off.";
             }
-            else if (app.profileScreen ? !app.message.empty() && app.focus == app.messageFocus
+            else if (app.reportScreen ? !app.message.empty() && !app.recording && (app.messageFocus < 0 || app.focus == app.messageFocus)
+                     : app.profileScreen ? !app.message.empty() && app.focus == app.messageFocus
                                        : !app.message.empty() && (current.action == Action::Install || current.action == Action::ChooseUpdate ||
                                                                   current.action == Action::CheckUpdate || current.action == Action::InstallUpdate || app.messageIsError))
             {
@@ -709,7 +801,9 @@ namespace
             frame.corner = setup::UsesUpdate() ? "TITLE UPDATE 6" : "DISC VERSION 1.0.557";
             if (*update::Current()) frame.corner = std::string(update::Current()) + "   " + frame.corner;
             if (!app.updated.empty()) frame.status = "Updated to " + app.updated + ". " + frame.status;
-            frame.hint = app.profileScreen ? "ENTER OR (A) TO CHOOSE, ESC OR (B) TO GO BACK" : "ENTER OR (A) TO CHOOSE";
+            frame.hint = app.recording                          ? ""
+                         : app.profileScreen || app.reportScreen ? "ENTER OR (A) TO CHOOSE, ESC OR (B) TO GO BACK"
+                                                                 : "ENTER OR (A) TO CHOOSE";
 
             const int pointed = ui::Draw(fonts, frame, scale, app.focus);
             if (pointed >= 0) chosen = pointed;

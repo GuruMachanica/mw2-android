@@ -217,6 +217,8 @@ void install::StartNextTitle()
     SDL_Environment* environment = SDL_GetEnvironment();
     if (hex.empty()) SDL_UnsetEnvironmentVariable(environment, kLaunchDataVariable);
     else SDL_SetEnvironmentVariable(environment, kLaunchDataVariable, hex.c_str(), true);
+    // It writes on in this run's log, where there is one (main.cpp).
+    SDL_SetEnvironmentVariable(environment, "MW2_LOG_APPEND", "1", true);
     const std::string path = Utf8(file);
     const char* const args[] = { path.c_str(), nullptr };
     SDL_PropertiesID properties = SDL_CreateProperties();

@@ -119,6 +119,7 @@ namespace
 }
 
 const char* update::Current() { return MW2_RELEASE_TAG; }
+const char* update::Kind() { return MW2_RELEASE_KIND; }
 
 update::Check update::Look(Release& release, std::string& error)
 {

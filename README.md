@@ -46,6 +46,10 @@ The launcher also has PROFILE (set the multiplayer rank and prestige, unlock
 everything, open the campaign's and Special Ops' missions) and CHECK FOR
 UPDATES, which installs a newer release over this one.
 
+Something wrong? REPORT A BUG runs the game once with its log kept, then
+writes a report file and opens a new issue with your system's description
+filled in. Describe what happened, drag the file in, and submit.
+
 Saves go in `saves/` beside the executables.
 
 ## Play

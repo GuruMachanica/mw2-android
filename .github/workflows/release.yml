@@ -206,7 +206,15 @@ jobs:
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
+          # The bullets are placeholders: the draft is edited before it is
+          # published, to say what the release brings.
           cat > notes.md <<'EOF'
+          This release includes:
+          - NEW:
+          - NEW:
+          - Fixed:
+          - Built on ${{ github.sha }}
+
           Needs your own copy of the game: an ISO of the Xbox 360 disc, version 1.0.557.
           Take `steam` to play online through Steam, `lan` to play on a local network.
           Extract it anywhere and start `mw2-launcher`: it installs the game from your ISO, then starts it.

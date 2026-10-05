@@ -232,6 +232,11 @@ namespace
                 if (cf.IsFetch(n))
                 {
                     Fetch f{ m_words[at], m_words[at + 1], m_words[at + 2] };
+                    // A fetch reads its coordinates from a temporary, and for
+                    // a pixel shader that is an input like any other read
+                    // below: often the only read of that interpolator.
+                    if (m_type == shader::Type::Pixel && f.SourceRegister() < kInterpolatorCount)
+                        m_result.interpolatorMask |= 1u << f.SourceRegister();
                     if (f.Opcode() == FetchOpcode::TextureFetch)
                     {
                         const uint32_t slot = f.ConstantIndex() & 31;

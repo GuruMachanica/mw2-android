@@ -18,6 +18,8 @@ namespace update
     // The release this build is, or empty: a build nobody released has
     // nothing to compare with and does not update.
     const char* Current();
+    // Its system and online service, "linux-steam".
+    const char* Kind();
 
     struct Release
     {

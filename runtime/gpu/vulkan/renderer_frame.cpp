@@ -6,6 +6,7 @@
 #include "texture_cache.h"
 #include "../../log.h"
 #include "../../pacing_trace.h"
+#include "../../report.h"
 
 #ifdef MW2_HAVE_VULKAN
 
@@ -280,6 +281,7 @@ namespace vk::renderer::detail
         }
         pacing::Note(pacing::kFrame, worldDrawn ? 1 : 0);
         stutters::Finished(g.frames, worldDrawn);
+        report::Frame(worldDrawn);
         NoteFrame(worldDrawn);
         if (worldDrawn)
         {

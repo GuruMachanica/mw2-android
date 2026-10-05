@@ -135,7 +135,9 @@ push constants
 - A vertex shader writes `gl_Position` and all sixteen interpolators to
   locations 0..15 (zero until written), because a pixel-shader input with no
   vertex output behind it is invalid. A pixel shader reads the interpolators it
-  uses and writes only the colour targets it exports (locations 0..3).
+  uses and writes only the colour targets it exports (locations 0..3). The
+  ones it uses are the low temporaries any instruction reads, a texture
+  fetch's coordinates included: some are read by nothing else.
 - Set 1 declares a slot as 2D, cube or 3D according to how the program fetches
   it (`Translation::textureKinds`); 1D fetches are sampled as 2D at v = 0.
 
