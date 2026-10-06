@@ -10,6 +10,7 @@
 #include "objects.h"
 #include "../guest.h"
 #include "../log.h"
+#include "../signin.h"
 #include "../online/service.h"
 
 #include <algorithm>
@@ -71,6 +72,38 @@ namespace
         std::string name = service ? service->LocalName() : "Player";
         if (name.size() > 15) name.resize(15);   // a gamertag's longest
         return name;
+    }
+
+    // Who is at a controller. The first is the player above, signed in to
+    // Live when the online service carries lobbies. The others are whoever
+    // the sign-in screen put there (signin.h): a profile of this machine,
+    // which is local and offline.
+    struct Who
+    {
+        uint32_t state = 0;            // 0 nobody, 1 local, 2 Live
+        uint64_t offline = 0, online = 0;
+        std::string name;
+    };
+    Who WhoIs(uint32_t user)
+    {
+        Who who;
+        if (user == kLocalUser)
+        {
+            const bool live = online::Live();
+            who.state = live ? kSignedInToLive : kSignedInLocally;
+            who.offline = LocalXuid();
+            who.online = live ? LocalOnlineXuid() : 0;
+            who.name = LocalName();
+            return who;
+        }
+        const signin::Player player = signin::At(user);
+        if (player.signedIn)
+        {
+            who.state = kSignedInLocally;
+            who.offline = 0xE000000000000000ull | player.id;
+            who.name = player.name;
+        }
+        return who;
     }
 }
 
@@ -191,30 +224,30 @@ PPC_FUNC(__imp__XNotifyGetNext)
 
 PPC_FUNC(__imp__XNotifyPositionUI) { ctx.r3.u64 = 0; }
 
-// One signed-in user in slot 0: local and offline, or signed in to Live when
-// the online service carries lobbies.
+// Zero for nobody, one for a local profile, two for a player on Live.
 PPC_FUNC(__imp__XamUserGetSigninState)
 {
-    ctx.r3.u64 = (ctx.r3.u32 == kLocalUser) ? (online::Live() ? kSignedInToLive : kSignedInLocally) : 0;
+    ctx.r3.u64 = WhoIs(ctx.r3.u32).state;
 }
 
 // (user, typeMask, xuidOut). Mask 1 asks for the offline XUID, 2 and 4 for the
 // online one, which a player signed in to Live has.
 PPC_FUNC(__imp__XamUserGetXUID)
 {
-    if (ctx.r3.u32 != kLocalUser) { ctx.r3.u64 = X_ERROR_NO_SUCH_USER; return; }
-    const bool online = online::Live() && (ctx.r4.u32 & 6);
-    if (auto* xuid = GuestPtr<be64>(ctx.r5.u32)) *xuid = online ? LocalOnlineXuid() : LocalXuid();
+    const Who who = WhoIs(ctx.r3.u32);
+    if (!who.state) { ctx.r3.u64 = X_ERROR_NO_SUCH_USER; return; }
+    if (auto* xuid = GuestPtr<be64>(ctx.r5.u32)) *xuid = who.online && (ctx.r4.u32 & 6) ? who.online : who.offline;
     ctx.r3.u64 = X_ERROR_SUCCESS;
 }
 
 PPC_FUNC(__imp__XamUserGetName)
 {
-    if (ctx.r3.u32 != kLocalUser) { ctx.r3.u64 = X_ERROR_NO_SUCH_USER; return; }
+    const Who who = WhoIs(ctx.r3.u32);
+    if (!who.state) { ctx.r3.u64 = X_ERROR_NO_SUCH_USER; return; }
     if (auto* name = GuestPtr<char>(ctx.r4.u32))
     {
         uint32_t size = ctx.r5.u32;
-        std::snprintf(name, size ? size : 1, "%s", LocalName().c_str());
+        std::snprintf(name, size ? size : 1, "%s", who.name.c_str());
     }
     ctx.r3.u64 = X_ERROR_SUCCESS;
 }
@@ -224,16 +257,16 @@ PPC_FUNC(__imp__XamUserGetName)
 PPC_FUNC(__imp__XamUserGetSigninInfo)
 {
     // XUSER_SIGNIN_INFO { xuid, flags, state, guestNumber, sponsorIndex, name[16] }
-    if (ctx.r3.u32 != kLocalUser) { ctx.r3.u64 = X_ERROR_NO_SUCH_USER; return; }
+    const Who who = WhoIs(ctx.r3.u32);
+    if (!who.state) { ctx.r3.u64 = X_ERROR_NO_SUCH_USER; return; }
     if (auto* info = GuestPtr<be32>(ctx.r5.u32))
     {
-        const bool live = online::Live();
         constexpr uint32_t kOfflineOnly = 2, kLiveEnabled = 1;
         std::memset(info, 0, 40);
-        *GuestPtr<be64>(ctx.r5.u32) = live && !(ctx.r4.u32 & kOfflineOnly) ? LocalOnlineXuid() : LocalXuid();
-        info[2] = live ? kLiveEnabled : 0;                            // flags
-        info[3] = live ? kSignedInToLive : kSignedInLocally;          // state
-        std::snprintf(reinterpret_cast<char*>(info) + 24, 16, "%s", LocalName().c_str());
+        *GuestPtr<be64>(ctx.r5.u32) = who.online && !(ctx.r4.u32 & kOfflineOnly) ? who.online : who.offline;
+        info[2] = who.online ? kLiveEnabled : 0;                      // flags
+        info[3] = who.state;
+        std::snprintf(reinterpret_cast<char*>(info) + 24, 16, "%s", who.name.c_str());
     }
     ctx.r3.u64 = X_ERROR_SUCCESS;
 }
@@ -242,7 +275,7 @@ PPC_FUNC(__imp__XamUserGetSigninInfo)
 // signed in to Live, the player has them all.
 PPC_FUNC(__imp__XamUserCheckPrivilege)
 {
-    if (auto* result = GuestPtr<be32>(ctx.r5.u32)) *result = online::Live() ? 1 : 0;
+    if (auto* result = GuestPtr<be32>(ctx.r5.u32)) *result = WhoIs(ctx.r3.u32).state == kSignedInToLive ? 1 : 0;
     ctx.r3.u64 = X_ERROR_SUCCESS;
 }
 
@@ -256,8 +289,13 @@ PPC_FUNC(__imp__XamUserAreUsersFriends)
 
 PPC_FUNC(__imp__XamUserCreateStatsEnumerator){ ctx.r3.u64 = X_ERROR_NOT_FOUND; }
 
-// There is no dashboard to show; report that the user dismissed the dialog.
-PPC_FUNC(__imp__XamShowSigninUI)           { ctx.r3.u64 = X_ERROR_SUCCESS; }
+// (panes, flags). The console's sign-in screen, which is signin.h's here; the
+// title hears of what was chosen as a change of who is signed in.
+PPC_FUNC(__imp__XamShowSigninUI)
+{
+    signin::Ask();
+    ctx.r3.u64 = X_ERROR_SUCCESS;
+}
 // Choosing where to save. This is the dialog behind "Unable to Write to Default
 // Save Device": until it names a device the title has nowhere to put a save, so
 // it asks again before every level.

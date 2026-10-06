@@ -16,6 +16,10 @@ namespace profile
     // One player's multiplayer stats.
     struct Player
     {
+        // A profile made on the game's sign-in screen (saves/profiles.txt) has
+        // a name there, and no stats file until its first match ends.
+        std::string name;
+        uint64_t id = 0;
         std::filesystem::path file;
         bool offline = false;       // the profile nobody signed in to an online service with
         int level = 1, prestige = 0;
@@ -24,6 +28,10 @@ namespace profile
     // Every stats file under saves/ this version of the game can read, the
     // one played last first.
     std::vector<Player> Players();
+
+    // A new name for a profile of the sign-in screen: up to fifteen letters,
+    // digits and spaces.
+    bool Rename(const Player& player, const std::string& name, std::string& error);
 
     bool MaxRank(const Player& player, std::string& error);
     bool SetPrestige(const Player& player, int prestige, std::string& error);

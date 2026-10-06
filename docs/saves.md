@@ -80,7 +80,9 @@ writes them with `XamUserWriteProfileSettings` and reads them back at start-up,
 with six system settings, through `XamUserReadProfileSettings`.
 
 The runtime stores every setting the title writes in `saves/profile.bin` and
-hands it back unchanged. A setting is an id, a source and its bytes; nothing
+hands it back unchanged. That file is the first controller's player's; a
+profile signed in at another controller ([gameplay.md](gameplay.md#signing-in))
+has `profile_<id>.bin`. A setting is an id, a source and its bytes; nothing
 interprets them. Settings never written (the six system settings among them)
 are answered as unset, which is what an offline profile with nothing
 configured looks like. An empty profile makes every launch a first boot, with

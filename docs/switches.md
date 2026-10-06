@@ -24,7 +24,7 @@ them as unset whatever the environment says, and also drops the keys `F7`,
 | `MW2_RUN_SECONDS=<n>` | | reports and exits after n seconds |
 | `MW2_WATCHDOG=<seconds>` | | when it fires: the `MW2_DUMP` blocks, what every guest thread is blocked on (handle and caller) or spinning on, and every thread's backtrace, which is the guest call stack; then exits |
 | `kill -USR2 <pid>` | | every thread's stack, as the watchdog prints them, and the run continues (Linux). Sent a few times, it tells a stuck thread from a looping one |
-| `MW2_INPUT_SCRIPT="20:start,26:a"` | | presses pad inputs at wall-clock seconds. An entry names a button (`a b x y lb rb start back up down left right lthumb rthumb`), a trigger (`lt`, `rt`) or a stick direction (`lx+ lx- ly+ ly- rx+ rx- ry+ ry-`), with an optional hold time: `"40:lt:25"` holds the left trigger 25 s. Default hold 0.2 s |
+| `MW2_INPUT_SCRIPT="20:start,26:a"` | | presses pad inputs at wall-clock seconds. An entry names a button (`a b x y lb rb start back up down left right lthumb rthumb`), a trigger (`lt`, `rt`) or a stick direction (`lx+ lx- ly+ ly- rx+ rx- ry+ ry-`), with an optional hold time: `"40:lt:25"` holds the left trigger 25 s. Default hold 0.2 s. A name ending in `@2`, `@3` or `@4` is that player's controller, which the script then stands in for: `"5:a@2"`. `guide` is the Guide button, which opens the sign-in screen |
 
 ## Online
 

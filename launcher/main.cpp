@@ -27,6 +27,7 @@
 #include <imgui_impl_sdlrenderer3.h>
 
 #include <algorithm>
+#include <cctype>
 #include <atomic>
 #include <chrono>
 #include <cstdio>
@@ -186,7 +187,7 @@ namespace
     {
         None, PlayCampaign, PlayMultiplayer, Install, ChooseUpdate, Cancel, Quit,
         // The profile screen and what it does.
-        Profile, Back, NextPlayer, MaxRank, Prestige, UnlockEverything, UnlockMissions, AllStars,
+        Profile, Back, NextPlayer, Rename, MaxRank, Prestige, UnlockEverything, UnlockMissions, AllStars,
         CheckUpdate, InstallUpdate,
         // The bug report screen: a run of either game with its log kept.
         Report, ReportCampaign, ReportMultiplayer,
@@ -224,6 +225,8 @@ namespace
         bool profileScreen = false;
         std::vector<profile::Player> players;
         size_t player = 0;
+        bool renaming = false;          // the keyboard types a profile's new name
+        std::string newName;
         profile::Campaign campaign;
         update::Release release;        // the newer version a look found, if `newer`
         bool newer = false;
@@ -367,6 +370,12 @@ namespace
             case Action::NextPlayer:
                 player = (player + 1) % players.size();
                 break;
+            case Action::Rename:
+                renaming = true;
+                newName = players[player].name;
+                message.clear();
+                SDL_StartTextInput(window);
+                break;
             case Action::MaxRank:
             case Action::Prestige:
             case Action::UnlockEverything:
@@ -377,6 +386,33 @@ namespace
             case Action::None:
                 break;
             }
+        }
+
+        // The keyboard while a profile is renamed.
+        void Type(const SDL_Event& event)
+        {
+            if (event.type == SDL_EVENT_TEXT_INPUT)
+            {
+                for (const char* c = event.text.text; *c; c++)
+                    if (newName.size() < 15 && (std::isalnum(static_cast<unsigned char>(*c)) || *c == ' ')) newName += *c;
+                return;
+            }
+            if (event.type != SDL_EVENT_KEY_DOWN) return;
+            if (event.key.key == SDLK_BACKSPACE && !newName.empty()) newName.pop_back();
+            const bool keep = event.key.key == SDLK_RETURN || event.key.key == SDLK_KP_ENTER;
+            if (!keep && event.key.key != SDLK_ESCAPE) return;
+            renaming = false;
+            SDL_StopTextInput(window);
+            if (!keep) return;
+            std::string error;
+            const uint64_t id = players[player].id;
+            const bool done = profile::Rename(players[player], newName, error);
+            message = done ? "The profile is now " + newName + "." : error;
+            messageIsError = !done;
+            messageFocus = focus;
+            ReadProfile();
+            for (size_t i = 0; i < players.size(); i++)
+                if (players[i].id == id) player = i;
         }
 
         void ReadProfile()
@@ -498,15 +534,20 @@ namespace
                 entries.push_back(std::move(entry));
                 return &entries.back();
             };
-            const bool any = !players.empty() && !gameRunning;
+            // A profile made on the sign-in screen has no stats to change
+            // until its first match has ended.
+            const bool any = !players.empty() && !players[player].file.empty() && !gameRunning;
             std::string who = "No multiplayer profile yet: play the multiplayer once first.";
             int prestige = 0;
+            bool named = false;
             if (!players.empty())
             {
                 const profile::Player& p = players[player];
                 prestige = p.prestige;
-                who = "Rank " + std::to_string(p.level) + ", prestige " + std::to_string(p.prestige) + ".\n" +
-                      (p.offline ? "The offline profile" : "An online profile") + ", last played " + p.played + ".";
+                named = p.id != 0;
+                who = (named ? p.name + ". " : std::string()) + "Rank " + std::to_string(p.level) + ", prestige " + std::to_string(p.prestige) + ".\n" +
+                      (p.offline ? "An offline profile" : "An online profile") +
+                      (p.file.empty() ? ", not played yet." : ", last played " + p.played + ".");
             }
             // The game keeps the profile in memory and writes it when it ends,
             // over anything changed here meanwhile.
@@ -514,6 +555,10 @@ namespace
             if (players.size() > 1)
                 add(Action::NextPlayer, "PLAYER " + std::to_string(player + 1) + " OF " + std::to_string(players.size()), true, "PLAYER",
                     who + "\n\nSeveral players have played here. Choose to go to the next one.");
+            add(Action::Rename, "RENAME", named && !gameRunning, "NAME",
+                renaming ? "New name: " + newName + "_\n\nENTER keeps it, ESC leaves the name as it was."
+                         : who + "\n\n" + (named ? "Type a new name for this profile with the keyboard."
+                                                  : "Only the profiles made on the game's sign-in screen, for the players at the second to fourth controllers, are named here.") + close);
             add(Action::MaxRank, "MAX RANK", any, "MULTIPLAYER RANK", who + "\n\nSets the rank to 70, which unlocks every weapon, perk and equipment." + close);
             add(Action::Prestige, "PRESTIGE " + std::to_string(prestige), any, "PRESTIGE",
                 who + "\n\nEach choice is one prestige more; after " + std::to_string(profile::MaxPrestige()) + " it is 0 again. The rank stays." + close);
@@ -748,6 +793,7 @@ namespace
         while (!app.quit)
         {
             SDL_Event event;
+            const bool wasRenaming = app.renaming;
             while (SDL_PollEvent(&event))
             {
                 ImGui_ImplSDL3_ProcessEvent(&event);
@@ -758,10 +804,14 @@ namespace
                 }
                 // A disc image dropped on the window installs from it; while
                 // the update is what is asked for, the file is the update.
+                // A profile's new name, typed.
+                if (app.renaming) app.Type(event);
                 if (event.type == SDL_EVENT_DROP_FILE && event.drop.data)
                     app.Take(app.needsUpdateFile ? Action::ChooseUpdate : Action::Install, event.drop.data);
             }
             app.Poll();
+            // The key that ended the typing is not also a choice.
+            const bool typed = wasRenaming && !app.renaming;
 
             ImGui_ImplSDLRenderer3_NewFrame();
             ImGui_ImplSDL3_NewFrame();
@@ -777,6 +827,7 @@ namespace
                     if (entries[i].shown.enabled) { app.focus = i; break; }
                 app.focusPlaced = true;
             }
+            const int focusBefore = app.focus;
             auto pressed = [](std::initializer_list<ImGuiKey> keys, bool repeat) {
                 for (ImGuiKey key : keys)
                     if (ImGui::IsKeyPressed(key, repeat)) return true;
@@ -786,7 +837,10 @@ namespace
             if (pressed({ ImGuiKey_UpArrow, ImGuiKey_GamepadDpadUp, ImGuiKey_GamepadLStickUp }, true)) app.focus = (app.focus + count - 1) % count;
             app.focus = std::clamp(app.focus, 0, count - 1);
             int chosen = pressed({ ImGuiKey_Enter, ImGuiKey_KeypadEnter, ImGuiKey_Space, ImGuiKey_GamepadFaceDown }, false) ? app.focus : -1;
-            if (app.job && pressed({ ImGuiKey_Escape, ImGuiKey_GamepadFaceRight }, false)) app.job->progress.cancel = true;
+            // While a name is typed the keys are its letters, and the entry stays.
+            if (app.renaming || typed) { app.focus = focusBefore; chosen = -1; }
+            if (app.renaming || typed) {}
+            else if (app.job && pressed({ ImGuiKey_Escape, ImGuiKey_GamepadFaceRight }, false)) app.job->progress.cancel = true;
             else if ((app.profileScreen || (app.reportScreen && !app.recording)) && pressed({ ImGuiKey_Escape, ImGuiKey_GamepadFaceRight }, false))
             {
                 app.Do(Action::Back);

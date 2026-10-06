@@ -470,7 +470,18 @@ PPC_FUNC(__imp__NetDll_bind)
     { t_lastError = 10022; ctx.r3.u64 = uint32_t(-1); return; }
 
     if (!online::Get() && ::bind(s, reinterpret_cast<sockaddr*>(&addr), sizeof addr) != 0)
-    { t_lastError = LastHostError(); ctx.r3.u64 = uint32_t(-1); return; }
+    {
+        t_lastError = LastHostError();
+        // Another copy on this machine has the port, which no console ever
+        // finds: the title takes a failed bind for a fatal error and starts
+        // itself again, into the same failure. The socket stays unbound
+        // instead, and this copy plays without a network: it hears nothing
+        // sent to the port. Two copies on one machine need an online service
+        // (lan), which gives each its own.
+        if (t_lastError != 10048) { ctx.r3.u64 = uint32_t(-1); return; }
+        LOGW("net: port %u is taken by another copy of the game on this machine; this copy has no network",
+             unsigned(ntohs(UnshiftPort(addr.sin_port))));
+    }
     {
         std::lock_guard g(g_socketLock);
         g_sockets[ctx.r4.u32].port = ntohs(UnshiftPort(addr.sin_port));

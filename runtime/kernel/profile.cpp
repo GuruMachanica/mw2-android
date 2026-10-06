@@ -9,7 +9,9 @@
 // Answering that read with "nothing is set" describes a profile that has never
 // been used, which is a fresh first boot every launch: the calibration screen
 // comes back, and every setting the player changed is gone. The settings are
-// kept in saves/profile.bin instead and handed straight back. Nothing here
+// kept in saves/profile.bin instead and handed straight back. Those of a
+// profile signed in at another controller (signin.h) are in
+// saves/profile_<its id>.bin. Nothing here
 // interprets them -- a setting is an id, a source and its bytes -- so whatever
 // the title chooses to put in its blobs survives without this having to know
 // what any of it means.
@@ -18,6 +20,7 @@
 #include "objects.h"
 #include "../guest.h"
 #include "../log.h"
+#include "../signin.h"
 
 #include <algorithm>
 #include <cstdio>
@@ -25,6 +28,7 @@
 #include <filesystem>
 #include <map>
 #include <mutex>
+#include <string>
 #include <vector>
 
 using namespace kernel;
@@ -56,22 +60,43 @@ namespace
         std::vector<uint8_t> bytes;
     };
 
+    struct Profile
+    {
+        std::map<uint32_t, Setting> settings;
+        fs::path file;
+        bool read = false;
+    };
     std::mutex g_lock;
-    std::map<uint32_t, Setting> g_settings;
-    bool g_read = false;
+    std::map<std::string, Profile> g_profiles;   // by file name
 
-    fs::path ProfilePath() { return SaveRoot() / "profile.bin"; }
+    // The profile of whoever is at a controller, or null for nobody.
+    Profile* ProfileOfLocked(uint32_t user)
+    {
+        std::string key = "profile.bin";
+        if (user != 0)
+        {
+            const signin::Player player = signin::At(user);
+            if (!player.signedIn) return nullptr;
+            char name[40];
+            std::snprintf(name, sizeof name, "profile_%012llx.bin", (unsigned long long)player.id);
+            key = name;
+        }
+        Profile& profile = g_profiles[key];
+        if (profile.file.empty()) profile.file = SaveRoot() / key;
+        return &profile;
+    }
 
     // "MW2PROF1", a count, then id / source / length / bytes for each setting.
     constexpr char kMagic[8] = { 'M','W','2','P','R','O','F','1' };
 
-    void LoadLocked()
+    std::map<uint32_t, Setting>& LoadLocked(Profile& profile)
     {
-        if (g_read) return;
-        g_read = true;
+        auto& settings = profile.settings;
+        if (profile.read) return settings;
+        profile.read = true;
 
-        std::FILE* f = std::fopen(ProfilePath().string().c_str(), "rb");
-        if (!f) return;
+        std::FILE* f = std::fopen(profile.file.string().c_str(), "rb");
+        if (!f) return settings;
 
         char magic[8] = {};
         uint32_t count = 0;
@@ -88,27 +113,29 @@ namespace
             setting.source = source;
             setting.bytes.resize(length);
             ok = length == 0 || std::fread(setting.bytes.data(), 1, length, f) == length;
-            if (ok) g_settings[id] = std::move(setting);
+            if (ok) settings[id] = std::move(setting);
         }
         std::fclose(f);
 
-        if (!ok) { g_settings.clear(); LOGE("profile: %s is not readable, starting fresh",
-                                           ProfilePath().string().c_str()); }
-        else LOGK("profile: %zu settings read from %s", g_settings.size(),
-                  ProfilePath().string().c_str());
+        if (!ok) { settings.clear(); LOGE("profile: %s is not readable, starting fresh",
+                                           profile.file.string().c_str()); }
+        else LOGK("profile: %zu settings read from %s", settings.size(),
+                  profile.file.string().c_str());
+        return settings;
     }
 
-    void SaveLocked()
+    void SaveLocked(const Profile& profile)
     {
+        const auto& settings = profile.settings;
         std::error_code ec;
         fs::create_directories(SaveRoot(), ec);
-        std::FILE* f = std::fopen(ProfilePath().string().c_str(), "wb");
-        if (!f) { LOGE("profile: cannot write %s", ProfilePath().string().c_str()); return; }
+        std::FILE* f = std::fopen(profile.file.string().c_str(), "wb");
+        if (!f) { LOGE("profile: cannot write %s", profile.file.string().c_str()); return; }
 
-        const uint32_t count = uint32_t(g_settings.size());
+        const uint32_t count = uint32_t(settings.size());
         std::fwrite(kMagic, 1, 8, f);
         std::fwrite(&count, 4, 1, f);
-        for (auto& [id, setting] : g_settings)
+        for (auto& [id, setting] : settings)
         {
             const uint32_t key = id, source = setting.source;
             const uint32_t length = uint32_t(setting.bytes.size());
@@ -138,7 +165,10 @@ PPC_FUNC(__imp__XamUserReadProfileSettings)
     auto* ids = GuestPtr<be32>(settingIds);
 
     std::lock_guard guard(g_lock);
-    LoadLocked();
+    // Nobody signed in there: nothing is set.
+    static const std::map<uint32_t, Setting> kNone;
+    Profile* profile = ProfileOfLocked(userIndex);
+    const auto& settings = profile ? LoadLocked(*profile) : kNone;
 
     // A blob does not fit in the entry, so it goes after the entries and the
     // entry points at it -- which means the size the caller needs depends on
@@ -146,8 +176,8 @@ PPC_FUNC(__imp__XamUserReadProfileSettings)
     uint32_t blobBytes = 0;
     for (uint32_t i = 0; ids && i < settingCount; i++)
     {
-        auto it = g_settings.find(uint32_t(ids[i]));
-        if (it != g_settings.end() && TypeOf(uint32_t(ids[i])) == kBinary)
+        auto it = settings.find(uint32_t(ids[i]));
+        if (it != settings.end() && TypeOf(uint32_t(ids[i])) == kBinary)
             blobBytes += uint32_t(it->second.bytes.size());
     }
     const uint32_t required = 8 + settingCount * kStride + blobBytes;
@@ -175,8 +205,8 @@ PPC_FUNC(__imp__XamUserReadProfileSettings)
         entry[kUser / 4] = userIndex;
         entry[kId / 4]   = id;
 
-        auto it = g_settings.find(id);
-        if (it == g_settings.end()) continue;      // source stays zero: not set
+        auto it = settings.find(id);
+        if (it == settings.end()) continue;      // source stays zero: not set
 
         const Setting& setting = it->second;
         entry[kSource / 4] = setting.source;
@@ -208,7 +238,14 @@ PPC_FUNC(__imp__XamUserWriteProfileSettings)
     const uint32_t overlapped   = ctx.r7.u32;
 
     std::lock_guard guard(g_lock);
-    LoadLocked();
+    Profile* profile = ProfileOfLocked(ctx.r4.u32);
+    if (!profile)
+    {
+        CompleteOverlapped(overlapped, X_ERROR_NO_SUCH_USER);
+        ctx.r3.u64 = X_ERROR_NO_SUCH_USER;
+        return;
+    }
+    auto& stored = LoadLocked(*profile);
 
     uint32_t kept = 0;
     for (uint32_t i = 0; settings && i < settingCount; i++)
@@ -232,13 +269,13 @@ PPC_FUNC(__imp__XamUserWriteProfileSettings)
             setting.bytes.assign(guest::Base() + address + kValue,
                                  guest::Base() + address + kValue + 8);
         }
-        g_settings[id] = std::move(setting);
+        stored[id] = std::move(setting);
         kept++;
     }
 
-    if (kept) SaveLocked();
+    if (kept) SaveLocked(*profile);
     LOGK("profile: %u of %u settings written to %s", kept, settingCount,
-         ProfilePath().string().c_str());
+         profile->file.string().c_str());
     CompleteOverlapped(overlapped, X_ERROR_SUCCESS);
     ctx.r3.u64 = X_ERROR_SUCCESS;
 }

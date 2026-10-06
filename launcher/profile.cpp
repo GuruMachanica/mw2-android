@@ -3,6 +3,7 @@
 #include "playerdata_layout.h"
 
 #include <algorithm>
+#include <cctype>
 #include <chrono>
 #include <cstring>
 #include <ctime>
@@ -267,6 +268,56 @@ namespace
     const char* const kNoProfile = "There is no campaign profile yet: start the campaign once first.";
 }
 
+namespace
+{
+    // saves/profiles.txt, the game's (runtime/signin.cpp): a line per profile,
+    // twelve hexadecimal digits, a space, the name.
+    struct Named { uint64_t id; std::string name; };
+    std::vector<Named> ReadNamed()
+    {
+        std::vector<Named> named;
+        std::ifstream in(kSaves / "profiles.txt");
+        for (std::string line; std::getline(in, line); )
+        {
+            while (!line.empty() && (line.back() == '\r' || line.back() == ' ')) line.pop_back();
+            if (line.size() < 14 || line[12] != ' ') continue;
+            char* end = nullptr;
+            const uint64_t id = std::strtoull(line.substr(0, 12).c_str(), &end, 16);
+            if (id && !*end) named.push_back({ id, line.substr(13, 15) });
+        }
+        return named;
+    }
+
+    std::string IdText(uint64_t id)
+    {
+        char text[16];
+        std::snprintf(text, sizeof text, "%012llx", (unsigned long long)id);
+        return text;
+    }
+}
+
+bool profile::Rename(const Player& player, const std::string& name, std::string& error)
+{
+    if (name.empty() || name.size() > 15 || name.front() == ' ' || name.back() == ' ' ||
+        !std::all_of(name.begin(), name.end(), [](unsigned char c) { return std::isalnum(c) || c == ' '; }))
+    {
+        error = "A name is one to fifteen letters, digits and spaces.";
+        return false;
+    }
+    std::vector<Named> named = ReadNamed();
+    bool found = false;
+    for (Named& entry : named)
+    {
+        if (entry.id == player.id) { entry.name = name; found = true; }
+        else if (entry.name == name) { error = "Another profile has that name."; return false; }
+    }
+    if (!found) { error = "That profile is not one of the sign-in screen's."; return false; }
+    std::ofstream out(kSaves / "profiles.txt", std::ios::trunc);
+    for (const Named& entry : named) out << IdText(entry.id) << ' ' << entry.name << '\n';
+    if (!out) { error = "saves/profiles.txt could not be written."; return false; }
+    return true;
+}
+
 std::vector<profile::Player> profile::Players()
 {
     struct Found { Player player; fs::file_time_type written; };
@@ -295,6 +346,22 @@ std::vector<profile::Player> profile::Players()
     std::sort(found.begin(), found.end(), [](const Found& a, const Found& b) { return a.written > b.written; });
     std::vector<Player> players;
     for (Found& entry : found) players.push_back(std::move(entry.player));
+    // The sign-in screen's profiles: the stats file of one is named by its
+    // id, and one that has not finished a match has none.
+    for (const Named& entry : ReadNamed())
+    {
+        const std::string package = "mpdata_e000" + IdText(entry.id);
+        auto it = std::find_if(players.begin(), players.end(), [&](const Player& player) {
+            return player.file.filename().string() == package; });
+        if (it == players.end())
+        {
+            players.emplace_back();
+            it = players.end() - 1;
+            it->offline = true;
+        }
+        it->name = entry.name;
+        it->id = entry.id;
+    }
     return players;
 }
 

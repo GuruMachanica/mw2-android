@@ -268,6 +268,12 @@ if(MW2_USE_SDL)
                              "extern const unsigned kIconSize = ${icon_size};\n")
     file(GENERATE OUTPUT "${MW2_FONTS_SOURCE}" CONTENT "${fonts_text}")
 
+    # The game draws its sign-in screen (runtime/signin.cpp) with the same
+    # fonts, rasterised by the stb_truetype that comes with Dear ImGui.
+    target_sources(mw2 PRIVATE "${MW2_FONTS_SOURCE}")
+    target_include_directories(mw2 PRIVATE "${imgui_SOURCE_DIR}")
+    target_compile_definitions(mw2 PRIVATE MW2_SIGNIN_PICTURE=1)
+
     set(XENON "${CMAKE_SOURCE_DIR}/XenonRecomp")
     file(GLOB LAUNCHER_SOURCES CONFIGURE_DEPENDS "${CMAKE_SOURCE_DIR}/launcher/*.cpp")
     add_executable(launcher ${LAUNCHER_SOURCES}

@@ -83,6 +83,37 @@ play: while spectating (`pm_type` 5) or following another player it clears every
 rumble each frame. A headless test has to spawn first (`MW2_WALK_PATH`) and then
 fire (`MW2_INPUT_SCRIPT`).
 
+## Signing in
+
+The first controller's player is the one the online service logged in, signed
+in from the start. Nobody is at the others until the sign-in screen puts
+someone there (`runtime/signin.cpp`), and nothing of it is kept between runs.
+It is the console's screen, which a title asks for with `XamShowSigninUI` and
+never draws: the multiplayer asks from SIGN IN PROFILE and CHANGE PROFILE in
+split screen, and when a controller nobody is signed in at chooses SYSTEM
+LINK. The Guide button opens it too, as on the console, or Back and Start
+together where the system keeps that button.
+
+The console's screen also signs a guest in beside a player on Live. This one
+does not: the title's split screen is offline only, and its system link takes
+one player a copy.
+
+It lists the profiles of this machine that are not already playing, and "New
+profile", which makes "Player 2" or the next free number. A profile is a line
+of `saves/profiles.txt`, twelve hexadecimal digits and a name, and is signed in
+locally (state 1) under the offline XUID `0xE000` over those digits; the title
+names its stats by that XUID and its settings are `profile_<digits>.bin`
+([saves.md](saves.md)). The launcher's PROFILE screen renames one.
+
+The screen opens for the controller pressed last, since the call does not say
+which. While it is open the title reads every controller as idle and hears
+`XN_SYS_UI`; a choice is `XN_SYS_SIGNINCHANGED` with a bit per signed-in
+controller, on which the title reads the new profile, stopping for a second.
+
+The picture is drawn on the CPU with the launcher's fonts and laid over the
+middle of the frame by the presenter, as a copy: it is opaque.
+`MW2_DUMP_FRAMES` writes each state of it as `signin_<n>.ppm`.
+
 ## The save-device prompt
 
 The campaign asks which storage device to save to until each controller has

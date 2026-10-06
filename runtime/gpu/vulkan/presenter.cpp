@@ -5,6 +5,7 @@
 #include "../../crash.h"
 #include "../../console.h"
 #include "../../stutters.h"
+#include "../../signin.h"
 #include "../../online/service.h"
 
 #if !defined(MW2_HAVE_VULKAN) || !defined(MW2_USE_SDL)
@@ -80,6 +81,21 @@ namespace
         VkCommandPool pool = VK_NULL_HANDLE;
         Frame frames[kFramesInFlight]{};
         uint32_t frameIndex = 0;
+
+        // The sign-in screen (signin.h), laid over the frame while it is open:
+        // its picture, the image it is copied to and the buffer it goes by.
+        struct Overlay
+        {
+            signin::Image picture;
+            VkImage image = VK_NULL_HANDLE;
+            VkDeviceMemory imageMemory = VK_NULL_HANDLE;
+            VkBuffer staging = VK_NULL_HANDLE;
+            VkDeviceMemory stagingMemory = VK_NULL_HANDLE;
+            void* mapped = nullptr;
+            uint32_t width = 0, height = 0;
+            uint64_t uploaded = 0;       // the picture's version the image holds
+            bool everUploaded = false;
+        } overlay;
 
         std::thread worker;
         std::atomic<bool> running{ false };
@@ -549,6 +565,118 @@ namespace
 
     // Shows the oldest queued frame, or with `idle` the window's own colour
     // before the renderer has finished any.
+    void DestroyOverlay()
+    {
+        auto& o = g.overlay;
+        if (o.image) vkDestroyImage(g.device, o.image, nullptr);
+        if (o.imageMemory) vkFreeMemory(g.device, o.imageMemory, nullptr);
+        if (o.staging) vkDestroyBuffer(g.device, o.staging, nullptr);
+        if (o.stagingMemory) vkFreeMemory(g.device, o.stagingMemory, nullptr);
+        o.image = VK_NULL_HANDLE; o.imageMemory = VK_NULL_HANDLE;
+        o.staging = VK_NULL_HANDLE; o.stagingMemory = VK_NULL_HANDLE;
+        o.mapped = nullptr; o.width = o.height = 0; o.everUploaded = false;
+    }
+
+    bool CreateOverlay(uint32_t width, uint32_t height)
+    {
+        auto& o = g.overlay;
+        VkPhysicalDeviceMemoryProperties memory{};
+        vkGetPhysicalDeviceMemoryProperties(g.physical, &memory);
+
+        VkImageCreateInfo image{ VK_STRUCTURE_TYPE_IMAGE_CREATE_INFO };
+        image.imageType = VK_IMAGE_TYPE_2D;
+        image.format = VK_FORMAT_B8G8R8A8_UNORM;
+        image.extent = { width, height, 1 };
+        image.mipLevels = 1;
+        image.arrayLayers = 1;
+        image.samples = VK_SAMPLE_COUNT_1_BIT;
+        image.tiling = VK_IMAGE_TILING_OPTIMAL;
+        image.usage = VK_IMAGE_USAGE_TRANSFER_SRC_BIT | VK_IMAGE_USAGE_TRANSFER_DST_BIT;
+        image.initialLayout = VK_IMAGE_LAYOUT_UNDEFINED;
+        if (!Check(vkCreateImage(g.device, &image, nullptr, &o.image), "the sign-in screen's image")) return false;
+        VkMemoryRequirements needs{};
+        vkGetImageMemoryRequirements(g.device, o.image, &needs);
+        VkMemoryAllocateInfo allocate{ VK_STRUCTURE_TYPE_MEMORY_ALLOCATE_INFO };
+        allocate.allocationSize = needs.size;
+        allocate.memoryTypeIndex = vk::util::FindMemory(memory, needs.memoryTypeBits, VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT);
+        if (allocate.memoryTypeIndex == UINT32_MAX ||
+            !Check(vkAllocateMemory(g.device, &allocate, nullptr, &o.imageMemory), "the sign-in screen's memory") ||
+            !Check(vkBindImageMemory(g.device, o.image, o.imageMemory, 0), "the sign-in screen's memory"))
+            return false;
+
+        VkBufferCreateInfo buffer{ VK_STRUCTURE_TYPE_BUFFER_CREATE_INFO };
+        buffer.size = VkDeviceSize(width) * height * 4;
+        buffer.usage = VK_BUFFER_USAGE_TRANSFER_SRC_BIT;
+        if (!Check(vkCreateBuffer(g.device, &buffer, nullptr, &o.staging), "the sign-in screen's buffer")) return false;
+        vkGetBufferMemoryRequirements(g.device, o.staging, &needs);
+        allocate.allocationSize = needs.size;
+        allocate.memoryTypeIndex = vk::util::FindMemory(memory, needs.memoryTypeBits,
+            VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT | VK_MEMORY_PROPERTY_HOST_COHERENT_BIT);
+        if (allocate.memoryTypeIndex == UINT32_MAX ||
+            !Check(vkAllocateMemory(g.device, &allocate, nullptr, &o.stagingMemory), "the sign-in screen's buffer") ||
+            !Check(vkBindBufferMemory(g.device, o.staging, o.stagingMemory, 0), "the sign-in screen's buffer") ||
+            !Check(vkMapMemory(g.device, o.stagingMemory, 0, VK_WHOLE_SIZE, 0, &o.mapped), "the sign-in screen's buffer"))
+            return false;
+        o.width = width;
+        o.height = height;
+        return true;
+    }
+
+    // The sign-in screen over the middle of the swapchain image, which is in
+    // TRANSFER_DST layout. It is opaque, so a copy does it.
+    void DrawOverlay(const Frame& frame, VkImage target)
+    {
+        auto& o = g.overlay;
+        if (!signin::Picture(g.extent.height, o.picture)) return;
+        const uint32_t width = o.picture.width, height = o.picture.height;
+        if (width > g.extent.width || height > g.extent.height) return;
+
+        const bool resized = width != o.width || height != o.height;
+        if (resized || o.uploaded != o.picture.version || !o.everUploaded)
+        {
+            // The other frames' commands may still be reading the image and
+            // the buffer; this happens at a press of a button, not per frame.
+            for (const Frame& other : g.frames)
+                if (&other != &frame) vkWaitForFences(g.device, 1, &other.inFlight, VK_TRUE, UINT64_MAX);
+            if (resized)
+            {
+                DestroyOverlay();
+                if (!CreateOverlay(width, height)) { DestroyOverlay(); return; }
+            }
+            std::memcpy(o.mapped, o.picture.pixels.data(), o.picture.pixels.size());
+            vk::util::Barrier(frame.commands, o.image, VK_IMAGE_ASPECT_COLOR_BIT,
+                              VK_IMAGE_LAYOUT_UNDEFINED, VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL,
+                              0, VK_ACCESS_TRANSFER_WRITE_BIT,
+                              VK_PIPELINE_STAGE_TRANSFER_BIT, VK_PIPELINE_STAGE_TRANSFER_BIT);
+            VkBufferImageCopy copy{};
+            copy.imageSubresource = { VK_IMAGE_ASPECT_COLOR_BIT, 0, 0, 1 };
+            copy.imageExtent = { width, height, 1 };
+            vkCmdCopyBufferToImage(frame.commands, o.staging, o.image,
+                                   VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, 1, &copy);
+            vk::util::Barrier(frame.commands, o.image, VK_IMAGE_ASPECT_COLOR_BIT,
+                              VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL,
+                              VK_ACCESS_TRANSFER_WRITE_BIT, VK_ACCESS_TRANSFER_READ_BIT,
+                              VK_PIPELINE_STAGE_TRANSFER_BIT, VK_PIPELINE_STAGE_TRANSFER_BIT);
+            o.uploaded = o.picture.version;
+            o.everUploaded = true;
+        }
+
+        // The frame's blit wrote where this one writes.
+        vk::util::Barrier(frame.commands, target, VK_IMAGE_ASPECT_COLOR_BIT,
+                          VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL,
+                          VK_ACCESS_TRANSFER_WRITE_BIT, VK_ACCESS_TRANSFER_WRITE_BIT,
+                          VK_PIPELINE_STAGE_TRANSFER_BIT, VK_PIPELINE_STAGE_TRANSFER_BIT);
+        VkImageBlit blit{};
+        blit.srcSubresource = { VK_IMAGE_ASPECT_COLOR_BIT, 0, 0, 1 };
+        blit.srcOffsets[1] = { int32_t(width), int32_t(height), 1 };
+        blit.dstSubresource = blit.srcSubresource;
+        const int32_t left = int32_t(g.extent.width - width) / 2, top = int32_t(g.extent.height - height) / 2;
+        blit.dstOffsets[0] = { left, top, 0 };
+        blit.dstOffsets[1] = { left + int32_t(width), top + int32_t(height), 1 };
+        vkCmdBlitImage(frame.commands, o.image, VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL,
+                       target, VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, 1, &blit, VK_FILTER_NEAREST);
+    }
+
     void DrawOneFrame(bool idle)
     {
         if (g.remakeSwapchain) RemakeSwapchain();
@@ -635,6 +763,7 @@ namespace
             VkImageSubresourceRange range{ VK_IMAGE_ASPECT_COLOR_BIT, 0, 1, 0, 1 };
             vkCmdClearColorImage(frame.commands, image, VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, &colour, 1, &range);
         }
+        DrawOverlay(frame, image);
 
         vk::util::Barrier(frame.commands, image, VK_IMAGE_ASPECT_COLOR_BIT,
                           VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, VK_IMAGE_LAYOUT_PRESENT_SRC_KHR,
@@ -709,6 +838,7 @@ namespace
         if (g.device)
         {
             vkDeviceWaitIdle(g.device);
+            DestroyOverlay();
             for (auto& frame : g.frames)
             {
                 if (frame.acquired) vkDestroySemaphore(g.device, frame.acquired, nullptr);

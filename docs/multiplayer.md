@@ -128,6 +128,10 @@ sockets, ports -- and asks the service only for what a service does:
 A backend is one file, `runtime/online/<name>.cpp`, defining `online::Create()`;
 `ONLINE=<name>` (CMake `MW2_ONLINE`) builds it. `none` returns no service, and
 the title's sockets are host UDP sockets, enough for system link on one machine.
+A service that does not start (Steam not running) leaves the same. Only one copy
+can have the title's ports then; a second one's binds fail, which the title
+takes for a fatal error and restarts on, so `NetDll_bind` leaves its sockets
+unbound and it plays without a network.
 
 With a service built in, the title's sockets are the service's and nothing is
 bound on the host, so several copies can run on one machine. A peer's 64-bit id
