@@ -51,7 +51,7 @@ Everything under version control is hand-written or a patch.
 | `TU=<path>` | the title update: its package, or a folder holding its files. Needed until `mw2/update/` has them |
 | `VERSION=tu0` | builds the disc's own executables, without the update; see [The disc version](#the-disc-version) |
 | `RELEASE=1` | builds without diagnostics (`-DMW2_DIAGNOSTICS=OFF`) and, on Linux, with the C++ runtime linked statically (`MW2_PORTABLE`); adds `-release` to the build directory |
-| `ONLINE=none\|lan\|steam` | the online service ([multiplayer.md](multiplayer.md)); `none` (default) keeps system link on this machine |
+| `ONLINE=none\|lan\|steam` | the online service ([multiplayer.md](multiplayer.md)); `none` (default) keeps system link on this machine; `steam` has lan behind it |
 | `WINDOWS=1` | cross-compiles for Windows with llvm-mingw; the build directory becomes `build-win...` and the executable `mw2.exe` |
 | `LLVM_MINGW=<dir>` | the unpacked [llvm-mingw](https://github.com/mstorsjo/llvm-mingw) release, required by `WINDOWS=1` |
 | `ISO=<path>` | the disc image. Without one, `mw2/tu0/default.xex` and `mw2/tu0/default_mp.xex` are enough to build, and no game data is extracted |
@@ -137,7 +137,7 @@ The switches are in [switches.md](switches.md).
 | `MW2_DIAGNOSTICS` | `ON` | traces, dumps, statistics, end-of-run reports, the stutter detector and pacing timeline, the flash hunt, the write watchpoint and the headless harness (walker, input script, run deadlines, watchdog); see `runtime/diagnostics.h`. `OFF` unsets every diagnostic switch whatever the environment says |
 | `MW2_LOGGING` | `ON` | `OFF` compiles out every log line, warnings included |
 | `MW2_TRACE_INDIRECT` | `ON` | the generated code checks an indirect call's target and reports a missing one instead of jumping to null |
-| `MW2_ONLINE` | `none` | the online backend, a file under `runtime/online/` |
+| `MW2_ONLINE` | `none` | the online service: `none`, `lan`, or `steam` (Steam, then lan) |
 | `MW2_PORTABLE` | `OFF` | links libstdc++ and libgcc statically (Linux) |
 | `MW2_USE_SDL` | `ON` | SDL3 for the window, input and audio |
 

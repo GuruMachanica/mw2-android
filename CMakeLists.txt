@@ -78,20 +78,34 @@ file(GLOB RUNTIME_SOURCES CONFIGURE_DEPENDS
 # lives beside that output, since it is different for each title.
 # ---- online service --------------------------------------------------------
 # What the title's network calls reach (runtime/online/service.h): "none" keeps
-# system link on this machine, "lan" is plain UDP between machines. A backend is
-# the one file runtime/online/<name>.cpp.
-set(MW2_ONLINE "none" CACHE STRING "Online service backend: a file name under runtime/online/")
-set(MW2_ONLINE_SOURCE "${CMAKE_SOURCE_DIR}/runtime/online/${MW2_ONLINE}.cpp")
-if(NOT EXISTS "${MW2_ONLINE_SOURCE}" OR MW2_ONLINE STREQUAL "service")
-    message(FATAL_ERROR "MW2_ONLINE=${MW2_ONLINE}: there is no runtime/online/${MW2_ONLINE}.cpp")
+# system link on this machine, "lan" is plain UDP between machines, "steam" is
+# Steam, with lan behind it for when Steam is not running. A backend is the one
+# file runtime/online/<name>.cpp; the runtime tries them in service.cpp's order.
+set(MW2_ONLINE "none" CACHE STRING "Online service: none, lan or steam")
+if(MW2_ONLINE STREQUAL "none")
+    set(MW2_ONLINE_BACKENDS "")
+elseif(MW2_ONLINE STREQUAL "lan")
+    set(MW2_ONLINE_BACKENDS lan)
+elseif(MW2_ONLINE STREQUAL "steam")
+    set(MW2_ONLINE_BACKENDS steam lan)
+else()
+    message(FATAL_ERROR "MW2_ONLINE=${MW2_ONLINE}: none, lan or steam")
 endif()
+set(MW2_ONLINE_SOURCES "")
+set(MW2_ONLINE_DEFINITIONS "")
+foreach(backend ${MW2_ONLINE_BACKENDS})
+    list(APPEND MW2_ONLINE_SOURCES "${CMAKE_SOURCE_DIR}/runtime/online/${backend}.cpp")
+    string(TOUPPER "${backend}" backend_upper)
+    list(APPEND MW2_ONLINE_DEFINITIONS "MW2_ONLINE_${backend_upper}=1")
+endforeach()
 message(STATUS "Online service: ${MW2_ONLINE}")
 
 add_executable(mw2 ${RUNTIME_SOURCES}
     "${CMAKE_SOURCE_DIR}/runtime/online/service.cpp"
-    "${MW2_ONLINE_SOURCE}"
+    ${MW2_ONLINE_SOURCES}
     "${MW2_PPC_DIR}/stubs_generated.cpp")
 target_link_libraries(mw2 PRIVATE ppc_recomp)
+target_compile_definitions(mw2 PRIVATE ${MW2_ONLINE_DEFINITIONS})
 if(MW2_DIAGNOSTICS)
     target_compile_definitions(mw2 PRIVATE MW2_DIAGNOSTICS=1)
 else()

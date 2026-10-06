@@ -625,4 +625,4 @@ namespace
     };
 }
 
-std::unique_ptr<online::Service> online::Create() { return std::make_unique<Steam>(); }
+std::unique_ptr<online::Service> online::MakeSteam() { return std::make_unique<Steam>(); }

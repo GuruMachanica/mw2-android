@@ -11,7 +11,8 @@
 #   RELEASE=1 builds without diagnostics (runtime/diagnostics.h) into
 #   build-release/ or build-mp-release/.
 #   ONLINE=none|lan|steam picks the online service (runtime/online/); none, the
-#   default, keeps system link on this machine.
+#   default, keeps system link on this machine, and steam is lan when Steam is
+#   not running.
 #   WINDOWS=1 cross-compiles for Windows with llvm-mingw (LLVM_MINGW names its
 #   folder; cmake/mingw-w64.cmake) into a -win directory: build-win/, ...
 #   BUILD_DIR=<dir> builds there instead. REGENERATE=0 keeps the recompiled

@@ -63,7 +63,8 @@ Saves go in `saves/` beside the executables.
 
 **Online.** Everyone runs `mw2-mp` from the same build.
 
-- **Steam**: Steam must be running; the game shows as *Spacewar*. Host a
+- **Steam**: with Steam running, the game shows as *Spacewar*. Without it, the
+  `steam` download plays as the `lan` one does, with a rank of its own. Host a
   PLAY ONLINE → PRIVATE MATCH, invite from Steam's friend list (or `F6` if you
   added `mw2-mp` to Steam as a non-Steam game). The friend accepts while their
   game is running.

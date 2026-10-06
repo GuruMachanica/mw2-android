@@ -123,15 +123,26 @@ sockets, ports -- and asks the service only for what a service does:
 
     ONLINE=none  TITLE=mp ./build.sh    # default: system link on this machine
     ONLINE=lan   TITLE=mp ./build.sh    # plain UDP between machines
-    ONLINE=steam TITLE=mp ./build.sh    # through the player's Steam client
+    ONLINE=steam TITLE=mp ./build.sh    # through the player's Steam client, or lan without it
 
-A backend is one file, `runtime/online/<name>.cpp`, defining `online::Create()`;
-`ONLINE=<name>` (CMake `MW2_ONLINE`) builds it. `none` returns no service, and
-the title's sockets are host UDP sockets, enough for system link on one machine.
-A service that does not start (Steam not running) leaves the same. Only one copy
-can have the title's ports then; a second one's binds fail, which the title
-takes for a fatal error and restarts on, so `NetDll_bind` leaves its sockets
-unbound and it plays without a network.
+A backend is one file, `runtime/online/<name>.cpp`, with a function that makes
+it (`online::MakeLan`). `ONLINE` (CMake `MW2_ONLINE`) says which are built in,
+and `online::Get()` tries them in `service.cpp`'s order and keeps the first
+whose `Start()` succeeds: `steam` builds Steam and then lan, so a player whose
+Steam is not running plays over the local network instead, as another player
+(below). The log names the service.
+
+`none` builds no backend, and the title's sockets are host UDP sockets, enough
+for system link on one machine. Only one copy can have the title's ports then;
+a second one's binds fail, which the title takes for a fatal error and restarts
+on, so `NetDll_bind` leaves its sockets unbound and it plays without a network.
+
+The player's rank is kept under the service's account, so each service has its
+own, and a player with no service is account 1. The first time a service's
+player is seen on a machine he starts from what account 1 earned there
+(`InheritOfflineStats` in `runtime/kernel/xam.cpp`): its stats package is copied
+to his offline XUID's and, without its four leading bytes and its last, to his
+Live stats. Nothing is copied over stats he already has.
 
 With a service built in, the title's sockets are the service's and nothing is
 bound on the host, so several copies can run on one machine. A peer's 64-bit id

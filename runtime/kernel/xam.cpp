@@ -74,6 +74,44 @@ namespace
         return name;
     }
 
+    // The first time the online service's player is seen on this machine, he
+    // takes over the rank earned here with no service, when the one player
+    // was account 1: the offline stats package under his own offline XUID,
+    // and, signed in to Live, the stats Live keeps for him, which are the same
+    // file without its four leading bytes and its last (docs/saves.md). What
+    // he already has is left alone, and so is what is copied from.
+    void InheritOfflineStats()
+    {
+        auto* service = online::Get();
+        if (!service) return;
+        auto hex = [](uint64_t xuid) {
+            char text[20];
+            std::snprintf(text, sizeof text, "%016llx", (unsigned long long)xuid);
+            return std::string(text);
+        };
+        const fs::path& saves = SaveRoot();
+        const std::string none = "mpdata_e000000000000001";
+        std::ifstream in(saves / none / none, std::ios::binary);
+        const std::vector<char> stats{ std::istreambuf_iterator<char>(in), std::istreambuf_iterator<char>() };
+        constexpr size_t kLead = 4, kStored = 8192;
+        if (stats.size() != kLead + kStored + 1) return;
+
+        std::error_code ec;
+        const std::string own = "mpdata_" + hex(LocalXuid());
+        if (own != none && !fs::exists(saves / own, ec) && fs::create_directories(saves / own, ec))
+        {
+            std::ofstream(saves / own / own, std::ios::binary).write(stats.data(), std::streamsize(stats.size()));
+            LOGI("xam: %s starts from the rank earned here offline", own.c_str());
+        }
+        if (!online::Live()) return;
+        const fs::path live = saves / "online" / "user" / hex(LocalOnlineXuid());
+        if (!fs::exists(live / "mpdata", ec) && (fs::create_directories(live, ec), fs::is_directory(live, ec)))
+        {
+            std::ofstream(live / "mpdata", std::ios::binary).write(stats.data() + kLead, std::streamsize(kStored));
+            LOGI("xam: the Live stats of %s start from the rank earned here offline", hex(LocalOnlineXuid()).c_str());
+        }
+    }
+
     // Who is at a controller. The first is the player above, signed in to
     // Live when the online service carries lobbies. The others are whoever
     // the sign-in screen put there (signin.h): a profile of this machine,
@@ -89,6 +127,8 @@ namespace
         Who who;
         if (user == kLocalUser)
         {
+            static std::once_flag inherited;
+            std::call_once(inherited, InheritOfflineStats);
             const bool live = online::Live();
             who.state = live ? kSignedInToLive : kSignedInLocally;
             who.offline = LocalXuid();
