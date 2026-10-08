@@ -76,15 +76,17 @@ namespace
     // wait and every thread's stack go to the log, once a stall, as
     // `kill -USR2` gives them.
     std::atomic<int64_t> g_lastWorldUs{ -1 };
+    std::atomic<bool> g_ending{ false };
     void WatchForStalls()
     {
 #ifndef _WIN32
         int64_t reported = -1;
-        for (;;)
+        while (!g_ending.load(std::memory_order_relaxed))
         {
             usleep(100000);
             const int64_t last = g_lastWorldUs.load(std::memory_order_relaxed);
-            if (!g_inPlay.load(std::memory_order_relaxed) || last == reported ||
+            if (g_ending.load(std::memory_order_relaxed) ||
+                !g_inPlay.load(std::memory_order_relaxed) || last == reported ||
                 pacing::Microseconds() - last < kPauseUs)
                 continue;
             reported = last;
@@ -244,6 +246,8 @@ void stutters::Mark(const char* how)
         LOGW("STUTTER MARK %u (%s) at %.3f s: the last stutter was %.0f ms before", n, how,
              Seconds(now), double(now - last) / 1000.0);
 }
+
+void stutters::Ending() { g_ending.store(true, std::memory_order_relaxed); }
 
 void stutters::Report()
 {

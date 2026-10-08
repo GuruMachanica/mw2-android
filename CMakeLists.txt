@@ -231,6 +231,7 @@ add_executable(upload-texture
     "${CMAKE_SOURCE_DIR}/tools/upload_texture.cpp"
     "${CMAKE_SOURCE_DIR}/runtime/gpu/texture.cpp"
     "${CMAKE_SOURCE_DIR}/runtime/gpu/vulkan/texture_cache.cpp"
+    "${CMAKE_SOURCE_DIR}/runtime/gpu/vulkan/image_memory.cpp"
     "${CMAKE_SOURCE_DIR}/runtime/gpu/vulkan/texture_formats.cpp"
     "${CMAKE_SOURCE_DIR}/runtime/gpu/vulkan/pipeline.cpp"
     "${CMAKE_SOURCE_DIR}/runtime/gpu/vulkan/shader_translator.cpp"

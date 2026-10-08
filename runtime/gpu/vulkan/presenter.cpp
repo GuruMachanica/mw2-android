@@ -926,7 +926,7 @@ namespace
                 if (event.type == SDL_EVENT_QUIT ||
                     event.type == SDL_EVENT_WINDOW_CLOSE_REQUESTED)
                     crash::RequestExit("the window was closed");
-                // F10, F11, F9 and F7 are diagnostics.
+                // F10, F11, F9, F7 and F5 are diagnostics.
                 // F10 captures the next frames that draw the world. A defect
                 // that only appears in motion has to be caught by somebody
                 // watching for it; no time chosen in advance will do.
@@ -947,6 +947,14 @@ namespace
                 {
                     console::RunNow("viewpos");
                     LOGI("console: F9 -- viewpos asked for");
+                }
+                // F5 runs the console command MW2_F5 names: `noclip`, say, once
+                // a level's opening is behind.
+                else if (diag::kOn && event.type == SDL_EVENT_KEY_DOWN && !event.key.repeat &&
+                         event.key.scancode == SDL_SCANCODE_F5 && diag::Text("MW2_F5"))
+                {
+                    console::RunNow(diag::Text("MW2_F5"));
+                    LOGI("console: F5 -- %s", diag::Text("MW2_F5"));
                 }
                 // F7: "I saw a flash just now" -- a mark in the log, and the
                 // frames before it written out when MW2_FLASH_FRAMES keeps them.

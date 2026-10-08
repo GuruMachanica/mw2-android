@@ -68,6 +68,8 @@ namespace stutters
     void Displayed(uint64_t serial, uint32_t extraBlanks, double gapMs);
     // Somebody felt a hitch: Y on the pad, or F7.
     void Mark(const char* how);
+    // The run is ending: a frame that never comes is no stall now.
+    void Ending();
     void Report();
 #else
     inline bool On() { return false; }
@@ -77,6 +79,7 @@ namespace stutters
     inline void Shown(uint64_t) {}
     inline void Displayed(uint64_t, uint32_t, double) {}
     inline void Mark(const char*) {}
+    inline void Ending() {}
     inline void Report() {}
 #endif
 }

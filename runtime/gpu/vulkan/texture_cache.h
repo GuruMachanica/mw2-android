@@ -32,8 +32,10 @@ namespace vk::textures
 
     // Called by the renderer once per presented frame, between submissions: a
     // cached texture is signed at most once per frame however many draws bind
-    // it. Past the memory budget -- half the device's own memory, or
-    // MW2_TEXTURE_BUDGET_MB -- the textures bound longest ago are evicted here.
+    // it. This is also where the cache lets go: of images idle for ten seconds
+    // whose memory the title has rewritten, of the longest idle past the
+    // memory budget -- half the device's own memory, or MW2_TEXTURE_BUDGET_MB
+    // -- and of descriptor sets nothing has bound for as long.
     void NewFrame();
     // The count NewFrame keeps, which the texture log lines are numbered by.
     uint64_t FrameNumber();
@@ -48,6 +50,8 @@ namespace vk::textures
 
     // The texture a fetch constant describes, uploaded the first time it is
     // seen and handed back, re-staged if its memory changed, after that.
+    // The id is the image and the sampler the constant asks for: one image
+    // serves every sampler state the texture is bound with.
     uint64_t Upload(const gpu::TextureFetch& fetch, const char** error);
 
     // A render target the title resolved out to memory and samples back. The
@@ -59,7 +63,7 @@ namespace vk::textures
     // The caller is destroying a view it lent to Adopt. Every cached set is
     // dropped, because the replacement view can come back with the very same
     // handle -- Adopt's comparison then sees no change, and the set it hands
-    // out still holds the freed image's address. Call with the device idle.
+    // out still holds the freed image's address.
     void ForgetSets();
 
     // Already in the guest's block layout, with a default sampler and no caching:

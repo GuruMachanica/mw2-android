@@ -3,6 +3,7 @@
 #include "guest_memory.h"
 #include "guest.h"
 #include "log.h"
+#include "stutters.h"
 #include "diagnostics.h"
 #include "env.h"
 #include "kernel/kernel.h"
@@ -60,6 +61,7 @@ void crash::RequestExit(const char* why)
     std::thread([why] {
         LOGI("--------------------------------------------------");
         LOGI("exiting: %s", why);
+        stutters::Ending();
         gpu::Shutdown();
         ReportAll();
         install::StartNextTitle();

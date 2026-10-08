@@ -14,7 +14,7 @@ decides. The launcher writes its own settings there (RESOLUTION is
 
 Switches marked **R** are read by every build. The rest are diagnostic: a build
 without diagnostics (`RELEASE=1 ./build.sh`, `-DMW2_DIAGNOSTICS=OFF`) treats
-them as unset whatever the environment says, and also drops the keys `F7`,
+them as unset whatever the environment says, and also drops the keys `F5`, `F7`,
 `F9`, `F10` and `F11`, `kill -USR2` and the end-of-run reports.
 
 ## Running
@@ -62,6 +62,7 @@ walking to it.
 | `MW2_WALK_PAUSE=<seconds>` | stands still at every corner of the route |
 | `MW2_QUIT_AFTER_ARRIVAL=<seconds>` | ends the run that long after the walk arrives, or after it stops getting nearer for `MW2_QUIT_IF_STUCK` seconds (45) |
 | `MW2_RECORD_PATH=<file>` | writes where the player goes as a route for `MW2_WALK_PATH`, a point every `MW2_RECORD_SPACING` units (110), with d-pad left and right-trigger presses and their aim |
+| `MW2_F5=<command>` | with the window open, `F5` runs that console command: `MW2_F5=noclip` after `devmap`, to fly once a level's opening is behind |
 | `MW2_TRACE_VIEWPOS=1` | logs where the player stands once a second |
 | `F9` | with the window open and `MW2_ENGINE_LOG=1`: runs the title's `viewpos` and logs the position, whose five numbers `setviewpos x y z yaw pitch` takes in single player |
 
@@ -94,7 +95,7 @@ walking to it.
 | `MW2_MSAA=<n>` | R | draws every surface the title multisamples at n samples, rounded down to what the device offers |
 | `MW2_NO_MSAA=1` | R | draws the title's 2x and 4x surfaces at one sample |
 | `MW2_ARENA_MB=<n>` | R | the upload arena for constants, vertices and indices, shared by the frame slots (512) |
-| `MW2_TEXTURE_BUDGET_MB=<n>` | R | the texture cache's budget before it evicts what has not been bound lately (default half the device-local memory, within 256 MB to 2 GB) |
+| `MW2_TEXTURE_BUDGET_MB=<n>` | R | the texture cache's budget, past which it lets go of what has not been bound lately, even textures whose memory is unchanged (default half the device-local memory, within 256 MB to 2 GB) |
 | `MW2_PIPELINE_CACHE=<file>` | R | keeps the driver's compiled pipelines across runs |
 | `MW2_SHADER_CACHE=<file>` | R | records every pipeline a run needed and builds them at the next start-up |
 | `MW2_NO_PIPELINE_LIBRARIES=1` | R | builds each pipeline whole at its first draw instead of linking it from shaders compiled at load ([rendering.md](rendering.md)) |
