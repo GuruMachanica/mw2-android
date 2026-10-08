@@ -3,6 +3,15 @@
 The runtime is configured through `MW2_*` environment variables. A flag is on
 when set to anything but empty or `0` (`runtime/env.h`).
 
+## The settings file
+
+A file named `.env` beside the executables (in the current directory for a
+development run) holds switches as `NAME=value`, one a line. The runtime reads
+it first thing (`runtime/settings.cpp`) and sets each `MW2_` switch the
+environment does not already have, so a variable given on the command line
+decides. The launcher writes its own settings there (RESOLUTION is
+`MW2_SCALE`) and keeps the other lines.
+
 Switches marked **R** are read by every build. The rest are diagnostic: a build
 without diagnostics (`RELEASE=1 ./build.sh`, `-DMW2_DIAGNOSTICS=OFF`) treats
 them as unset whatever the environment says, and also drops the keys `F7`,
@@ -81,6 +90,7 @@ walking to it.
 
 | switch | | effect |
 |---|---|---|
+| `MW2_SCALE=<2 or 3>` | R | draws every surface that many times wider and taller than the title's: a 2560x1440 or 3840x2160 frame. The launcher's RESOLUTION entry sets it in the settings file ([rendering.md](rendering.md#resolution-scale)) |
 | `MW2_MSAA=<n>` | R | draws every surface the title multisamples at n samples, rounded down to what the device offers |
 | `MW2_NO_MSAA=1` | R | draws the title's 2x and 4x surfaces at one sample |
 | `MW2_ARENA_MB=<n>` | R | the upload arena for constants, vertices and indices, shared by the frame slots (512) |

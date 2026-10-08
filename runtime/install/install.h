@@ -22,6 +22,10 @@ namespace install
     // True when the command line asks for a player's start.
     bool PlayerStart(int argc, char** argv);
 
+    // The folder this start runs in: the executable's for a player's start,
+    // which Prepare moves to, and the current directory (empty) otherwise.
+    std::filesystem::path Folder(int argc, char** argv);
+
     // Loads the installed title. Returns false when the run should end, with
     // `exitCode` saying how: the launcher was started, or a failure was shown.
     bool Prepare(int argc, char** argv, Launch& launch, int& exitCode);

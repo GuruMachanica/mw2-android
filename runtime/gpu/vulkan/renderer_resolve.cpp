@@ -79,7 +79,7 @@ namespace vk::renderer::detail
         VkImageCreateInfo info{ VK_STRUCTURE_TYPE_IMAGE_CREATE_INFO };
         info.imageType = VK_IMAGE_TYPE_2D;
         info.format = format;
-        info.extent = { width, height, 1 };
+        info.extent = { width * g.scale, height * g.scale, 1 };
         info.mipLevels = 1;
         info.arrayLayers = 1;
         info.samples = VK_SAMPLE_COUNT_1_BIT;
@@ -132,7 +132,8 @@ namespace vk::renderer::detail
         into.width = width;
         into.height = height;
         into.depth = depth;
-        LOGI("renderer: %ux%u image for a %s resolve destination", width, height,
+        LOGI("renderer: %ux%u image for a %s resolve destination", width * g.scale,
+             height * g.scale,
              depth ? "depth" : "colour");
         return true;
     }
@@ -237,10 +238,10 @@ void vk::renderer::Resolve(const gpu::RegisterFile& r)
         // and a plain copy asks nothing of the format beyond being transferable.
         VkImageCopy copy{};
         copy.srcSubresource = { kBoth, 0, 0, 1 };
-        copy.srcOffset = { rect.offset.x, rect.offset.y, 0 };
+        copy.srcOffset = Scaled(rect.offset.x, rect.offset.y, 0);
         copy.dstSubresource = copy.srcSubresource;
-        copy.dstOffset = { int32_t(destX), int32_t(destY), 0 };
-        copy.extent = { width, height, 1 };
+        copy.dstOffset = Scaled(int32_t(destX), int32_t(destY), 0);
+        copy.extent = { width * g.scale, height * g.scale, 1 };
         const VkImage intoImage = into.image;
         Record([=](VkCommandBuffer command) {
             vkCmdCopyImage(command, fromImage, VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL,
@@ -275,7 +276,8 @@ void vk::renderer::Resolve(const gpu::RegisterFile& r)
 
     // Only a resolve the size of the display is the frame; presenting any other
     // would put a half-built one on the screen.
-    if (rect.extent.width != g.presentWidth || rect.extent.height != g.presentHeight)
+    if (rect.extent.width * g.scale != g.presentWidth ||
+        rect.extent.height * g.scale != g.presentHeight)
     {
         // The image is the destination surface RB_COPY_DEST_PITCH describes, not
         // the rectangle, and the rectangle lands at its own offset in it -- as
@@ -319,8 +321,8 @@ void vk::renderer::Resolve(const gpu::RegisterFile& r)
 
         VkImageBlit copy{};
         copy.srcSubresource = { VK_IMAGE_ASPECT_COLOR_BIT, 0, 0, 1 };
-        copy.srcOffsets[0] = { int32_t(destX), int32_t(destY), 0 };
-        copy.srcOffsets[1] = { int32_t(destX + width), int32_t(destY + height), 1 };
+        copy.srcOffsets[0] = Scaled(int32_t(destX), int32_t(destY), 0);
+        copy.srcOffsets[1] = Scaled(int32_t(destX + width), int32_t(destY + height), 1);
         copy.dstSubresource = copy.srcSubresource;
         copy.dstOffsets[0] = copy.srcOffsets[0];
         copy.dstOffsets[1] = copy.srcOffsets[1];
@@ -366,9 +368,9 @@ void vk::renderer::Resolve(const gpu::RegisterFile& r)
 
     VkImageBlit blit{};
     blit.srcSubresource = { VK_IMAGE_ASPECT_COLOR_BIT, 0, 0, 1 };
-    blit.srcOffsets[0] = { scissor.offset.x, scissor.offset.y, 0 };
-    blit.srcOffsets[1] = { int32_t(scissor.offset.x + copyWidth),
-                           int32_t(scissor.offset.y + copyHeight), 1 };
+    blit.srcOffsets[0] = Scaled(scissor.offset.x, scissor.offset.y, 0);
+    blit.srcOffsets[1] = Scaled(int32_t(scissor.offset.x + copyWidth),
+                                int32_t(scissor.offset.y + copyHeight), 1);
     blit.dstSubresource = blit.srcSubresource;
     blit.dstOffsets[0] = { 0, 0, 0 };
     blit.dstOffsets[1] = { int32_t(g.presentWidth), int32_t(g.presentHeight), 1 };

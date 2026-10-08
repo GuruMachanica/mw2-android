@@ -51,3 +51,6 @@ ppc_tu0/
 ppc_mp_tu0/
 build*-tu0/
 config/*_switch_tables.tu0.toml
+
+# ---- a development run's switches (docs/switches.md, "The settings file") ----
+.env

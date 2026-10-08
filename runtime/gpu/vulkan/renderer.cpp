@@ -104,6 +104,25 @@ bool vk::renderer::Initialise()
                      : "the device draws at 1x only");
     }
 
+    // MW2_SCALE=2 or 3 draws everything that many times wider and taller. A
+    // surface is at most 4096 of the title's pixels either way, and the scale
+    // is lowered until that fits an image of the device's.
+    {
+        VkPhysicalDeviceProperties properties{};
+        vkGetPhysicalDeviceProperties(g.physical, &properties);
+        const uint32_t asked = uint32_t(std::clamp<uint64_t>(env::Number("MW2_SCALE", 1), 1, 3));
+        g.scale = asked;
+        while (g.scale > 1 && 4096 * g.scale > properties.limits.maxImageDimension2D) g.scale--;
+        g.presentWidth *= g.scale;
+        g.presentHeight *= g.scale;
+        if (g.scale != asked)
+            LOGW("renderer: MW2_SCALE=%u is more than the device's %u-pixel images hold",
+                 asked, properties.limits.maxImageDimension2D);
+        if (g.scale > 1)
+            LOGI("renderer: drawing at %ux the title's sizes, a %ux%u frame", g.scale,
+                 g.presentWidth, g.presentHeight);
+    }
+
     VkCommandPoolCreateInfo pool{ VK_STRUCTURE_TYPE_COMMAND_POOL_CREATE_INFO };
     pool.queueFamilyIndex = vk::pipeline::QueueFamily();
     VkCommandBufferAllocateInfo allocate{ VK_STRUCTURE_TYPE_COMMAND_BUFFER_ALLOCATE_INFO };
@@ -274,8 +293,8 @@ bool vk::renderer::Initialise()
     {
         Target image;
         image.format = VK_FORMAT_R8G8B8A8_UNORM;
-        image.width = g.presentWidth;
-        image.height = g.presentHeight;
+        image.width = g.presentWidth / g.scale;     // MakeImage scales
+        image.height = g.presentHeight / g.scale;
         // STORAGE so the display's colour table can be applied to it in place.
         if (!MakeImage(image, VK_IMAGE_USAGE_TRANSFER_DST_BIT | VK_IMAGE_USAGE_TRANSFER_SRC_BIT |
                               VK_IMAGE_USAGE_STORAGE_BIT, 0))

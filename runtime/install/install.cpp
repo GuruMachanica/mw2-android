@@ -130,6 +130,11 @@ bool install::PlayerStart(int argc, char**)
     return argc == 1;
 }
 
+fs::path install::Folder(int argc, char** argv)
+{
+    return PlayerStart(argc, argv) ? ExecutableFolder() : fs::path();
+}
+
 bool install::Prepare(int, char**, Launch& launch, int& exitCode)
 {
     exitCode = 1;

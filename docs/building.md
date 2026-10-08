@@ -170,6 +170,7 @@ it is, the right half in the multiplayer's colours.
 | `download.cpp` | one file over HTTPS: `URLDownloadToFile` on Windows, the `curl` program elsewhere |
 | `update.cpp` | looks for a newer release and puts it in place of the running programs |
 | `report.cpp` | a bug report: a run with its log kept, the system's description, the new-issue page |
+| `settings.cpp` | what the player sets for the game, kept in `.env`, which the game reads as it starts |
 | `profile.cpp` | the profile screen's changes to the files under `saves/` ([saves.md](saves.md#what-the-launcher-changes)) |
 | `playerdata_layout.h` | generated: where the multiplayer's stats file keeps what `profile.cpp` changes |
 

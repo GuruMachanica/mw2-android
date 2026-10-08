@@ -367,13 +367,15 @@ namespace
         }
 
         // Register state, not shader state, so not part of a pipeline key.
+        // A stage has one range, so each runs on to the scaled slots both read.
+        constexpr uint32_t kEnd = bindings::kScaledPushOffset + bindings::kScaledPushBytes;
         VkPushConstantRange ranges[2]{};
         ranges[0].stageFlags = VK_SHADER_STAGE_FRAGMENT_BIT;
         ranges[0].offset = bindings::kPixelPushOffset;
-        ranges[0].size = bindings::kPixelPushBytes;
+        ranges[0].size = kEnd - bindings::kPixelPushOffset;
         ranges[1].stageFlags = VK_SHADER_STAGE_VERTEX_BIT;
         ranges[1].offset = bindings::kVertexPushOffset;
-        ranges[1].size = bindings::kVertexPushBytes;
+        ranges[1].size = kEnd - bindings::kVertexPushOffset;
 
         VkPipelineLayoutCreateInfo info{ VK_STRUCTURE_TYPE_PIPELINE_LAYOUT_CREATE_INFO };
         info.setLayoutCount = 3;

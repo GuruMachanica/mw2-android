@@ -406,7 +406,7 @@ PPC_FUNC(__imp__XamInputGetCapabilities)
     auto* caps = GuestPtr<XInputCapabilities>(ctx.r5.u32);
     if (!caps) { ctx.r3.u64 = X_ERROR_DEVICE_NOT_CONNECTED; return; }
 #ifdef MW2_USE_SDL
-    if (PadFor(user) || (user < 4 && g_scripted[user]))
+    if (PadFor(user) || (user < 4 && g_scripted[user]) || (user == 0 && player::Wanted()))
     {
         // What a wired 360 pad reports: every control it has at full range,
         // and both motors.

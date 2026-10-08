@@ -12,6 +12,7 @@
 #include "fonts.h"
 #include "profile.h"
 #include "report.h"
+#include "settings.h"
 #include "setup.h"
 #include "ui.h"
 #include "update.h"
@@ -189,6 +190,8 @@ namespace
         // The profile screen and what it does.
         Profile, Back, NextPlayer, Rename, MaxRank, Prestige, UnlockEverything, UnlockMissions, AllStars,
         CheckUpdate, InstallUpdate,
+        // The next of the sizes the game draws at.
+        Resolution,
         // The bug report screen: a run of either game with its log kept.
         Report, ReportCampaign, ReportMultiplayer,
         // The question a start asks when a recorded run was never reported.
@@ -369,6 +372,9 @@ namespace
                 break;
             case Action::NextPlayer:
                 player = (player + 1) % players.size();
+                break;
+            case Action::Resolution:
+                settings::SetScale(settings::Scale() % settings::kMaxScale + 1);
                 break;
             case Action::Rename:
                 renaming = true;
@@ -731,6 +737,16 @@ namespace
 
             add(Action::Profile, "PROFILE", true, "PROFILE",
                 "Set the multiplayer rank and prestige, unlock everything, and open the campaign's and Special Ops' missions.");
+            {
+                static const char* const kSizes[] = { "720P", "1440P", "4K" };
+                const int scale = settings::Scale();
+                add(Action::Resolution, std::string("RESOLUTION ") + kSizes[scale - 1], true, "RESOLUTION",
+                    std::string("The size the game draws at, whatever the window's: now ") + std::to_string(1280 * scale) + "x" +
+                    std::to_string(720 * scale) + (scale == 1 ? ", the console's own." : ".") +
+                    "\n\nChoose to go to the next: 720p, 1440p, 4K. A larger one is sharper and needs a faster graphics card: "
+                    "1440p draws four times the pixels and 4K nine times."
+                    "\n\nIt applies to the campaign and the multiplayer, from the next time either is started.");
+            }
             // What an install is for, once there is more than playing it.
             add(Action::None, "MAPS", false, "MAPS", "Add and remove custom maps.\n\nNot available yet.")->shown.tag = "SOON";
             // A build nobody released has no version to compare.
@@ -959,6 +975,7 @@ int main(int argc, char** argv)
     // What the last update left behind goes, now that the launcher it
     // replaced has ended.
     const std::string updated = update::Finish();
+    settings::Load();
     if (!arguments.empty())
     {
         if (usage)

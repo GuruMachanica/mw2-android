@@ -32,8 +32,8 @@ namespace
     class Translator
     {
     public:
-        Translator(shader::Type type, const uint32_t* words, size_t count)
-            : m_type(type), m_words(words), m_count(count) {}
+        Translator(shader::Type type, const uint32_t* words, size_t count, uint32_t scale)
+            : m_type(type), m_words(words), m_count(count), m_scale(scale) {}
 
         shader::Translation Run();
 
@@ -44,6 +44,7 @@ namespace
         Id DeclareArrayBlock(Id element, uint32_t count, uint32_t stride, uint32_t set,
                              uint32_t binding, const char* name);
         Id DeclarePushBlock(std::initializer_list<Id> members, uint32_t offset, const char* name);
+        Id GuestSize(Id size, uint32_t slot, uint32_t components);
         void EmitBody();
 
         void TranslateAlu(const Alu& op);
@@ -107,6 +108,9 @@ namespace
         shader::Type m_type;
         const uint32_t* m_words;
         size_t m_count;
+        // How many times wider and taller than the title's the render targets
+        // are (bindings::kScaledPushOffset).
+        uint32_t m_scale;
 
         Module m_module;
         shader::Translation m_result;
@@ -122,6 +126,8 @@ namespace
         // has no fixed-function form of.
         Id m_alphaTest = 0;
         Id m_ndc = 0;
+        Id m_pushBlock = 0;          // whichever of the two this stage has
+        uint32_t m_scaledMember = 0; // and where the scaled slots are in it
         Id m_position = 0;
         Id m_vertexIndex = 0;         // the index the sequencer puts in r0.x
         Id m_interpolators[kInterpolatorCount]{};
@@ -346,6 +352,9 @@ namespace
         Id block = m_module.Allocate();
         std::vector<uint32_t> operands{ block };
         operands.insert(operands.end(), members.begin(), members.end());
+        // Only a shader built for larger targets has the member, so one built
+        // for the title's own sizes is what it always was.
+        if (m_scale > 1) operands.push_back(m_uint);
         auto& declarations = m_module.Declarations();
         declarations.push_back(Head(Op::TypeStruct, uint32_t(operands.size()) + 1));
         declarations.insert(declarations.end(), operands.begin(), operands.end());
@@ -354,12 +363,40 @@ namespace
         for (uint32_t i = 0; i < members.size(); i++)
             Module::Emit(m_module.Decorations(), Op::MemberDecorate,
                          { block, i, uint32_t(Decoration::Offset), offset + 4 * i });
+        if (m_scale > 1)
+        {
+            m_scaledMember = uint32_t(members.size());
+            Module::Emit(m_module.Decorations(), Op::MemberDecorate,
+                         { block, m_scaledMember, uint32_t(Decoration::Offset),
+                           bindings::kScaledPushOffset });
+        }
         Id pointer = m_module.Pointer(StorageClass::PushConstant, block);
         Id variable = m_module.Allocate();
         Module::Emit(m_module.Declarations(), Op::Variable,
                      { pointer, variable, uint32_t(StorageClass::PushConstant) });
         Module::EmitString(m_module.Debug(), Op::Name, { variable }, name);
+        m_pushBlock = variable;
         return variable;
+    }
+
+    // The size the title gave a texture, from the size of the image bound for
+    // it. They differ for a resolve's copy when the render targets are larger
+    // than the title's: the copy is m_scale times the surface each way, and the
+    // title's half texels and unnormalised coordinates are still the surface's.
+    Id Translator::GuestSize(Id size, uint32_t slot, uint32_t components)
+    {
+        if (m_scale <= 1) return size;
+        Id mask = Emit(Op::Load, m_uint,
+                       { Emit(Op::AccessChain, m_module.Pointer(StorageClass::PushConstant, m_uint),
+                              { m_pushBlock, m_module.ConstantU(m_scaledMember) }) });
+        Id scaled = Emit(Op::INotEqual, m_bool,
+                         { Emit(Op::BitwiseAnd, m_uint, { mask, m_module.ConstantU(1u << slot) }),
+                           m_module.ConstantU(0) });
+        Id factor = Emit(Op::Select, m_float,
+                         { scaled, m_module.ConstantF(1.0f / float(m_scale)),
+                           m_module.ConstantF(1.0f) });
+        return Emit(Op::VectorTimesScalar,
+                    components == 3 ? m_module.Float3() : m_module.Float2(), { size, factor });
     }
 
     void Translator::DeclareInterface()
@@ -1519,6 +1556,7 @@ namespace
         Id size = Emit(Op::ConvertSToF, sizeCount == 3 ? m_module.Float3() : m_module.Float2(),
                        { Emit(Op::ImageQuerySizeLod, m_module.IntVector(sizeCount),
                               { bare, m_module.ConstantS(0) }) });
+        size = GuestSize(size, slot, sizeCount);
 
         // Offsets are in half texels, and every axis gets a sliver more: the
         // hardware turns a coordinate into fixed point with 8 bits below the
@@ -2223,9 +2261,10 @@ namespace
     }
 }
 
-shader::Translation shader::Translate(Type type, const uint32_t* words, size_t count)
+shader::Translation shader::Translate(Type type, const uint32_t* words, size_t count,
+                                      uint32_t scale)
 {
-    Translator translator(type, words, count);
+    Translator translator(type, words, count, scale);
     return translator.Run();
 }
 

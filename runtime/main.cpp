@@ -18,6 +18,7 @@
 #include "install/install.h"
 #include "platform.h"
 #include "report.h"
+#include "settings.h"
 
 #include <unistd.h>
 
@@ -148,6 +149,9 @@ int main(int argc, char** argv)
 {
     platform::Initialise();
 
+    // Before any switch is read, the log's among them.
+    const std::string kept = settings::Load(install::Folder(argc, argv) / ".env");
+
     // MW2_LOG_FILE=<path> sends the log there instead of the terminal. Every
     // line this runtime writes goes to stderr, so a plain `> file` redirection
     // catches nothing.
@@ -175,6 +179,7 @@ int main(int argc, char** argv)
     }
 
     LOGI("--- MW2 recompilation runtime (%s) ---", MW2_TITLE_NAME);
+    if (!kept.empty()) LOGI("settings: %s", kept.c_str());
 
     // A player starts the executable with no arguments (runtime/install/); a
     // development run names the image, a flat PE or the XEX, and the game folder.

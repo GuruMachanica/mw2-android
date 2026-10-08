@@ -14,7 +14,7 @@ files are included; you need your own disc.
 - Private matches and system link, online with friends:
   - **Steam** build: invite friends through Steam, no port to open
   - **LAN** build: for players without Steam, on the same network
-- 60 fps, native MSAA, any window size or fullscreen
+- 60 fps, native MSAA, any window size or fullscreen, drawn at 720p, 1440p or 4K
 - Xbox 360-style controller, with rumble
 
 Not supported: public matchmaking and ranked playlists (they needed
@@ -43,8 +43,10 @@ disc folder works too). If the update can't be downloaded, the launcher says
 where to get it and takes the file (`--update <file>`).
 
 The launcher also has PROFILE (set the multiplayer rank and prestige, unlock
-everything, open the campaign's and Special Ops' missions) and CHECK FOR
-UPDATES, which installs a newer release over this one.
+everything, open the campaign's and Special Ops' missions), RESOLUTION (the
+size the game draws at: 720p as on the console, 1440p or 4K, which need a
+faster graphics card) and CHECK FOR UPDATES, which installs a newer release
+over this one.
 
 Something wrong? REPORT A BUG runs the game once with its log kept, then
 writes a report file and opens a new issue with your system's description
@@ -80,8 +82,10 @@ rank and settings, or make a new one. The launcher's PROFILE screen renames
 them. Two copies of `mw2-mp` on one PC can play a SYSTEM LINK match, each with
 the controller that chose SYSTEM LINK in it.
 
-**Settings** (environment variables): `MW2_FULLSCREEN=1`, `MW2_MSAA=<n>` or
-`MW2_NO_MSAA=1`, `MW2_NO_AUDIO=1`.
+**Settings**: `MW2_FULLSCREEN=1`, `MW2_SCALE=<2 or 3>` (what RESOLUTION
+sets), `MW2_MSAA=<n>` or `MW2_NO_MSAA=1`, `MW2_NO_AUDIO=1`. Set them as
+environment variables, or keep them in a file named `.env` beside the
+executables, one per line.
 
 **Bug reports**: run with `MW2_LOG_FILE=mw2.log` and attach the file.
 

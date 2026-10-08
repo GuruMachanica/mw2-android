@@ -213,6 +213,12 @@ namespace vk::renderer::detail
         // colour, depth and stencil alike.
         bool msaa = false;
         VkSampleCountFlags sampleCounts = VK_SAMPLE_COUNT_1_BIT;
+        // MW2_SCALE: how many times wider and taller than the title's every
+        // EDRAM surface and resolve copy is. The title is not told: a Target's
+        // and a Resolved's sizes, and every rectangle worked out from the
+        // registers, stay the title's, and are multiplied where they are
+        // handed to Vulkan (Scaled).
+        uint32_t scale = 1;
 
         // The console's command processor runs while the title builds the next
         // frame. A slot owns the command buffer it records into, the fence that
@@ -351,6 +357,8 @@ namespace vk::renderer::detail
             bool pushValid = false;
             float ndc[4]{};          // window -> clip, for a pre-transformed vertex
             bool ndcValid = false;
+            uint32_t scaled = 0;     // the slots bound to a resolve's copy
+            bool scaledValid = false;
             VkBuffer indexBuffer = VK_NULL_HANDLE;
             uint32_t indexOffset = 0;
             int indexType = -1;
@@ -377,6 +385,7 @@ namespace vk::renderer::detail
         // The frame each image last held, which the window must have taken
         // before the image is drawn over.
         uint64_t presentSerial[kPresentImages]{};
+        // The present images' size: the title's frame times the scale.
         uint32_t presentWidth = 1280, presentHeight = 720;
 
         std::unordered_map<uint32_t, ResolveRing> resolvedTo;
@@ -467,6 +476,20 @@ namespace vk::renderer::detail
     // A resolve is sampled by vertex programs as well as pixel ones.
     constexpr VkPipelineStageFlags kShaderStages =
         VK_PIPELINE_STAGE_VERTEX_SHADER_BIT | VK_PIPELINE_STAGE_FRAGMENT_SHADER_BIT;
+
+    // The title's pixels as the images' (State::scale).
+    inline VkOffset2D Scaled(VkOffset2D at)
+    {
+        return { at.x * int32_t(g.scale), at.y * int32_t(g.scale) };
+    }
+    inline VkExtent2D Scaled(VkExtent2D size)
+    {
+        return { size.width * g.scale, size.height * g.scale };
+    }
+    inline VkOffset3D Scaled(int32_t x, int32_t y, int32_t z)
+    {
+        return { x * int32_t(g.scale), y * int32_t(g.scale), z };
+    }
 
     inline uint32_t FindMemory(uint32_t allowed, VkMemoryPropertyFlags want)
     {

@@ -343,6 +343,8 @@ namespace
                                   VK_QUERY_RESULT_64_BIT | VK_QUERY_RESULT_WAIT_BIT) != VK_SUCCESS)
             return;
         for (uint32_t i = 0; i < query.count; i++) query.samples += samples[i];
+        // The title compares the count with numbers of its own pixels.
+        query.samples /= uint64_t(g.scale) * g.scale;
     }
 }
 
