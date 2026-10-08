@@ -170,7 +170,9 @@ describes, uploading it the first time it is seen.
 - **Budget.** Past half the device-local memory (or `MW2_TEXTURE_BUDGET_MB`),
   `NewFrame` evicts the textures bound longest ago, none bound in the last ten
   seconds, down to three quarters of the budget, and resets the descriptor
-  pools.
+  pools. The evicted images are destroyed on a thread of their own: the driver
+  takes over half a millisecond to free one texture's memory, and a pass frees
+  thousands.
 
 ## Keeping images in step with guest memory
 

@@ -175,6 +175,8 @@ namespace vk::renderer::detail
         // A depth resolve is sampled through a depth-only view; the title reads
         // the scene's depth as an ordinary texture.
         bool depth = false;
+        // The surface the last colour resolve copied out of.
+        TargetKey from{};
         // The frame the last resolve landed in this image. The first resolve
         // of a frame may discard what was there; a later one -- the second
         // shadow cascade -- must keep it.

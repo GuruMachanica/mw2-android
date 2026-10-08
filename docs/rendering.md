@@ -174,10 +174,12 @@ destination address, and a texture fetch of that address binds the image.
   map is one 1024x2048 surface filled by two resolves.
 - Colour is blitted and also gets an sRGB view. Depth is copied and sampled
   through a depth-only view; the title reads scene depth as a texture.
-- **The frame** is a colour resolve of exactly 1280x720 of the title's pixels.
-  It is blitted into one of four present images, run through the display
-  colour table, and submitted.
-  A resolve of any other size is never shown.
+- **The frame** is the front buffer the swap packet names (`PM4_XE_SWAP`, which
+  `VdSwap` writes): a resolve destination like any other. At the swap its
+  newest copy is blitted into one of four present images, run through the
+  display colour table, and submitted. A resolve is never shown for having the
+  display's size: the title also keeps the screen in a 1280x720 texture, before
+  the interface is drawn, for the next frame's blur.
 
 A resolve does not end the submission unless the slot's arena share is half used.
 
@@ -281,7 +283,7 @@ parsed on the consumer, so the title's frame retires at parse time.
 
 ## Presenting
 
-The frame resolve waits (`vk::WaitUntilTaken`) until the window has copied out
+The swap waits (`vk::WaitUntilTaken`) until the window has copied out
 the present image it is about to reuse. With four present images, the renderer
 can run three frames ahead. The window presents every frame once, in order,
 one per blank (`FIFO`). Frames the window has not taken within 250 ms are

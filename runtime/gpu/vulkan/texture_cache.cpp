@@ -58,6 +58,7 @@ void vk::textures::BeginUploads(uint32_t) {}
 #include <cstring>
 #include <map>
 #include <string>
+#include <thread>
 #include <unordered_map>
 
 #include <vulkan/vulkan.h>
@@ -231,6 +232,8 @@ namespace
         uint64_t uploadedBytes = 0;
         uint64_t liveBytes = 0, budget = 0;   // what the uploaded images hold, and may
         uint64_t evicted = 0, evictedBytes = 0, evictionPasses = 0;
+        // An eviction's images, being destroyed off the consumer.
+        std::thread destroying;
         uint64_t nextEviction = 0;   // the first frame the next pass may run in
         std::map<std::string, uint32_t> failureReasons;
         std::string lastError;
@@ -917,6 +920,7 @@ void vk::textures::Shutdown()
 {
     if (!g.device) return;
     vkDeviceWaitIdle(g.device);
+    if (g.destroying.joinable()) g.destroying.join();
     for (Image& image : g.images) DestroyImage(image);
     g.images.clear();
     g.byFetch.clear();
@@ -1171,6 +1175,11 @@ namespace
         }
         const uint64_t target = g.budget / 4 * 3;
         uint64_t count = 0, bytes = 0;
+        // Nothing names these once the pass is over, and the device has just
+        // been idle, so they are destroyed on a thread of their own: the driver
+        // takes over half a millisecond to free one texture's memory, and a
+        // pass frees thousands -- seconds in which the game stood still.
+        std::vector<Image> gone;
         for (const auto& [lastBound, id] : oldest)
         {
             if (g.liveBytes <= target) break;
@@ -1182,8 +1191,13 @@ namespace
             g.liveBytes -= image.bytes;
             bytes += image.bytes;
             count++;
-            DestroyImage(image);
+            gone.push_back(std::move(image));
+            image = Image{};
         }
+        if (g.destroying.joinable()) g.destroying.join();
+        g.destroying = std::thread([gone = std::move(gone)]() mutable {
+            for (Image& image : gone) DestroyImage(image);
+        });
         g.sets.clear();
         while (g.descriptors.size() > 1)
         {

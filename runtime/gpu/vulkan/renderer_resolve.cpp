@@ -84,7 +84,8 @@ namespace vk::renderer::detail
         info.arrayLayers = 1;
         info.samples = VK_SAMPLE_COUNT_1_BIT;
         info.tiling = VK_IMAGE_TILING_OPTIMAL;
-        info.usage = VK_IMAGE_USAGE_TRANSFER_DST_BIT | VK_IMAGE_USAGE_SAMPLED_BIT;
+        info.usage = VK_IMAGE_USAGE_TRANSFER_SRC_BIT | VK_IMAGE_USAGE_TRANSFER_DST_BIT |
+                     VK_IMAGE_USAGE_SAMPLED_BIT;
         info.sharingMode = VK_SHARING_MODE_EXCLUSIVE;
         info.initialLayout = VK_IMAGE_LAYOUT_UNDEFINED;
         // Two views of one image, so the format has to be allowed to differ from
@@ -262,9 +263,10 @@ void vk::renderer::Resolve(const gpu::RegisterFile& r)
 
     // The registers name the surface, and the last pass recorded is not always
     // it: the world's is resolved after a later pass has bound its own.
-    Target* source = FindTarget({ colour.BaseTile(), surface.Pitch(),
-                                  uint32_t(ColourFormatFor(colour.Format())),
-                                  surface.MsaaSamples(), false });
+    const TargetKey sourceKey{ colour.BaseTile(), surface.Pitch(),
+                               uint32_t(ColourFormatFor(colour.Format())),
+                               surface.MsaaSamples(), false };
+    Target* source = FindTarget(sourceKey);
     if (!source) { Skip("resolve of a surface never drawn into"); SubmitIfFilling(); return; }
 
     // A resolve can arrive with nothing recording -- the one before it may have
@@ -274,90 +276,95 @@ void vk::renderer::Resolve(const gpu::RegisterFile& r)
 
     EndPass();
 
-    // Only a resolve the size of the display is the frame; presenting any other
-    // would put a half-built one on the screen.
-    if (rect.extent.width * g.scale != g.presentWidth ||
-        rect.extent.height * g.scale != g.presentHeight)
+    // The image is the destination surface RB_COPY_DEST_PITCH describes, not
+    // the rectangle, and the rectangle lands at its own offset in it -- as
+    // the depth resolve above does. The depth of field resolves a 256x152
+    // rectangle, rounded up to 8 rows, into a 256x150 surface and fetches
+    // 256x150; an image the size of the rectangle put two rows of whatever
+    // the target held below the picture, the fetch's v = 1 reached them, and
+    // their alpha of 1 -- the blur weight -- spread up through every blur
+    // pass into a dark bar along the bottom of the screen when aiming down
+    // the sights.
+    const gpu::CopyDestPitch destPitch{ r[gpu::RB_COPY_DEST_PITCH] };
+    const uint32_t destX = uint32_t(rect.offset.x);
+    const uint32_t destY = uint32_t(rect.offset.y);
+    const uint32_t surfaceWidth = destPitch.Pitch() ? std::min(destPitch.Pitch(), 4096u)
+                                                    : destX + rect.extent.width;
+    const uint32_t surfaceHeight = destPitch.Height() ? std::min(destPitch.Height(), 4096u)
+                                                      : destY + rect.extent.height;
+    const auto room = [](uint32_t size, uint32_t at) { return size > at ? size - at : 0u; };
+    const uint32_t width = std::min({ rect.extent.width, room(surfaceWidth, destX),
+                                      room(source->width, destX) });
+    const uint32_t height = std::min({ rect.extent.height, room(surfaceHeight, destY),
+                                       room(source->height, destY) });
+    Resolved& into = ResolveCopyFor(destination);
+    const bool firstThisFrame = into.writtenFrame != g.frames;
+    if (!destination || !width || !height ||
+        !MakeResolveImage(into, surfaceWidth, surfaceHeight, source->format, false,
+                          firstThisFrame))
     {
-        // The image is the destination surface RB_COPY_DEST_PITCH describes, not
-        // the rectangle, and the rectangle lands at its own offset in it -- as
-        // the depth resolve above does. The depth of field resolves a 256x152
-        // rectangle, rounded up to 8 rows, into a 256x150 surface and fetches
-        // 256x150; an image the size of the rectangle put two rows of whatever
-        // the target held below the picture, the fetch's v = 1 reached them, and
-        // their alpha of 1 -- the blur weight -- spread up through every blur
-        // pass into a dark bar along the bottom of the screen when aiming down
-        // the sights.
-        const gpu::CopyDestPitch destPitch{ r[gpu::RB_COPY_DEST_PITCH] };
-        const uint32_t destX = uint32_t(rect.offset.x);
-        const uint32_t destY = uint32_t(rect.offset.y);
-        const uint32_t surfaceWidth = destPitch.Pitch() ? std::min(destPitch.Pitch(), 4096u)
-                                                        : destX + rect.extent.width;
-        const uint32_t surfaceHeight = destPitch.Height() ? std::min(destPitch.Height(), 4096u)
-                                                          : destY + rect.extent.height;
-        const auto room = [](uint32_t size, uint32_t at) { return size > at ? size - at : 0u; };
-        const uint32_t width = std::min({ rect.extent.width, room(surfaceWidth, destX),
-                                          room(source->width, destX) });
-        const uint32_t height = std::min({ rect.extent.height, room(surfaceHeight, destY),
-                                           room(source->height, destY) });
-        Resolved& into = ResolveCopyFor(destination);
-        const bool firstThisFrame = into.writtenFrame != g.frames;
-        if (!destination || !width || !height ||
-            !MakeResolveImage(into, surfaceWidth, surfaceHeight, source->format, false,
-                              firstThisFrame))
-        {
-            Skip("resolve destination image");
-            SubmitIfFilling();
-            return;
-        }
-        into.writtenFrame = g.frames;
-        VkImage sourceImage = BeginReadingColour(*source, { int32_t(destX), int32_t(destY) },
-                                                 width, height);
-        if (!sourceImage) { Skip("resolve of a multisampled surface"); SubmitIfFilling(); return; }
-        // After the draws that sampled this copy's last contents.
-        RecordBarrier(into.image, VK_IMAGE_ASPECT_COLOR_BIT,
-                      VK_IMAGE_LAYOUT_UNDEFINED, VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL,
-                      0, VK_ACCESS_TRANSFER_WRITE_BIT, kShaderStages, VK_PIPELINE_STAGE_TRANSFER_BIT);
-
-        VkImageBlit copy{};
-        copy.srcSubresource = { VK_IMAGE_ASPECT_COLOR_BIT, 0, 0, 1 };
-        copy.srcOffsets[0] = Scaled(int32_t(destX), int32_t(destY), 0);
-        copy.srcOffsets[1] = Scaled(int32_t(destX + width), int32_t(destY + height), 1);
-        copy.dstSubresource = copy.srcSubresource;
-        copy.dstOffsets[0] = copy.srcOffsets[0];
-        copy.dstOffsets[1] = copy.srcOffsets[1];
-        const VkImage intoImage = into.image;
-        Record([=](VkCommandBuffer command) {
-            vkCmdBlitImage(command, sourceImage, VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL,
-                           intoImage, VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, 1, &copy,
-                           VK_FILTER_LINEAR);
-        });
-
-        RecordBarrier(into.image, VK_IMAGE_ASPECT_COLOR_BIT,
-                      VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL,
-                      VK_ACCESS_TRANSFER_WRITE_BIT, VK_ACCESS_SHADER_READ_BIT,
-                      VK_PIPELINE_STAGE_TRANSFER_BIT, kShaderStages);
-        EndReadingColour(*source);
-        ClearAfterResolve(r, control);
-        if (!SubmitIfFilling()) Skip("frame submission failed");
+        Skip("resolve destination image");
+        SubmitIfFilling();
         return;
     }
+    into.writtenFrame = g.frames;
+    into.from = sourceKey;
+    VkImage sourceImage = BeginReadingColour(*source, { int32_t(destX), int32_t(destY) },
+                                             width, height);
+    if (!sourceImage) { Skip("resolve of a multisampled surface"); SubmitIfFilling(); return; }
+    // After the draws that sampled this copy's last contents.
+    RecordBarrier(into.image, VK_IMAGE_ASPECT_COLOR_BIT,
+                  VK_IMAGE_LAYOUT_UNDEFINED, VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL,
+                  0, VK_ACCESS_TRANSFER_WRITE_BIT, kShaderStages, VK_PIPELINE_STAGE_TRANSFER_BIT);
 
-    source->presented++;
+    VkImageBlit copy{};
+    copy.srcSubresource = { VK_IMAGE_ASPECT_COLOR_BIT, 0, 0, 1 };
+    copy.srcOffsets[0] = Scaled(int32_t(destX), int32_t(destY), 0);
+    copy.srcOffsets[1] = Scaled(int32_t(destX + width), int32_t(destY + height), 1);
+    copy.dstSubresource = copy.srcSubresource;
+    copy.dstOffsets[0] = copy.srcOffsets[0];
+    copy.dstOffsets[1] = copy.srcOffsets[1];
+    const VkImage intoImage = into.image;
+    Record([=](VkCommandBuffer command) {
+        vkCmdBlitImage(command, sourceImage, VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL,
+                       intoImage, VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, 1, &copy,
+                       VK_FILTER_LINEAR);
+    });
 
-    // Copying the frame into an image of its own, rather than handing the render
-    // target to the window thread, keeps the next frame from overwriting it.
+    RecordBarrier(into.image, VK_IMAGE_ASPECT_COLOR_BIT,
+                  VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL,
+                  VK_ACCESS_TRANSFER_WRITE_BIT, VK_ACCESS_SHADER_READ_BIT,
+                  VK_PIPELINE_STAGE_TRANSFER_BIT, kShaderStages);
+    EndReadingColour(*source);
+    ClearAfterResolve(r, control);
+    if (!SubmitIfFilling()) Skip("frame submission failed");
+}
+
+// The frame is whatever the title swaps to: the front buffer the swap packet
+// names, which a resolve filled like any other destination. A resolve the size
+// of the display is not the frame for being that size -- the title keeps the
+// screen in one for the next frame's blur, before the interface is drawn.
+void vk::renderer::Swap(uint32_t frontBuffer)
+{
+    if (!g.device) return;
+    auto found = g.resolvedTo.find(frontBuffer & ~0xFFFu);
+    if (found == g.resolvedTo.end()) return;
+    Resolved& frame = found->second.copies[found->second.newest];
+    if (!frame.image || frame.depth) return;
+    if (!g.recording && !BeginFrame()) return;
+    EndPass();
+    if (Target* source = FindTarget(frame.from)) source->presented++;
+
+    // Copying the frame into an image of its own, rather than handing the
+    // resolve's to the window thread, keeps the next frame from overwriting it.
     const uint32_t index = g.presentIndex;
     VkImage present = g.present[index];
     vk::WaitUntilTaken(g.presentSerial[index]);
 
-    const VkRect2D& scissor = rect;
-    const uint32_t copyWidth = std::min(scissor.extent.width ? scissor.extent.width : source->width,
-                                        source->width);
-    const uint32_t copyHeight = std::min(scissor.extent.height ? scissor.extent.height : source->height,
-                                         source->height);
-    VkImage sourceImage = BeginReadingColour(*source, scissor.offset, copyWidth, copyHeight);
-    if (!sourceImage) { Skip("present of a multisampled surface"); Submit(); return; }
+    RecordBarrier(frame.image, VK_IMAGE_ASPECT_COLOR_BIT,
+                  VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL, VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL,
+                  VK_ACCESS_SHADER_READ_BIT, VK_ACCESS_TRANSFER_READ_BIT,
+                  kShaderStages, VK_PIPELINE_STAGE_TRANSFER_BIT);
     // After the window's copy out of it, and the dumps' and the display
     // table's work on it, the last time round.
     RecordBarrier(present, VK_IMAGE_ASPECT_COLOR_BIT,
@@ -368,16 +375,18 @@ void vk::renderer::Resolve(const gpu::RegisterFile& r)
 
     VkImageBlit blit{};
     blit.srcSubresource = { VK_IMAGE_ASPECT_COLOR_BIT, 0, 0, 1 };
-    blit.srcOffsets[0] = Scaled(scissor.offset.x, scissor.offset.y, 0);
-    blit.srcOffsets[1] = Scaled(int32_t(scissor.offset.x + copyWidth),
-                                int32_t(scissor.offset.y + copyHeight), 1);
+    blit.srcOffsets[1] = Scaled(int32_t(frame.width), int32_t(frame.height), 1);
     blit.dstSubresource = blit.srcSubresource;
-    blit.dstOffsets[0] = { 0, 0, 0 };
     blit.dstOffsets[1] = { int32_t(g.presentWidth), int32_t(g.presentHeight), 1 };
+    const VkImage frameImage = frame.image;
     Record([=](VkCommandBuffer command) {
-        vkCmdBlitImage(command, sourceImage, VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL,
+        vkCmdBlitImage(command, frameImage, VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL,
                        present, VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, 1, &blit, VK_FILTER_LINEAR);
     });
+    RecordBarrier(frame.image, VK_IMAGE_ASPECT_COLOR_BIT,
+                  VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL, VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL,
+                  VK_ACCESS_TRANSFER_READ_BIT, VK_ACCESS_SHADER_READ_BIT,
+                  VK_PIPELINE_STAGE_TRANSFER_BIT, kShaderStages);
 
     // What a television is handed has been through the display's colour table,
     // so what the window and the frame dumps show has to be too.
@@ -388,9 +397,6 @@ void vk::renderer::Resolve(const gpu::RegisterFile& r)
                   VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL,
                   VK_ACCESS_TRANSFER_WRITE_BIT, VK_ACCESS_TRANSFER_READ_BIT,
                   VK_PIPELINE_STAGE_TRANSFER_BIT, VK_PIPELINE_STAGE_TRANSFER_BIT);
-    EndReadingColour(*source);
-
-    ClearAfterResolve(r, control);
     FinishFrame(present);
 }
 

@@ -10,6 +10,7 @@ void vk::renderer::Shutdown() {}
 bool vk::renderer::Ready() { return false; }
 void vk::renderer::Draw(const gpu::RegisterFile&, const DrawCall&) {}
 void vk::renderer::Resolve(const gpu::RegisterFile&) {}
+void vk::renderer::Swap(uint32_t) {}
 void vk::renderer::BeginOcclusionQuery() {}
 bool vk::renderer::EndOcclusionQuery(uint32_t, uint64_t& samples) { samples = 0; return true; }
 void vk::renderer::CollectOcclusionQueries(void (*)(uint32_t, uint64_t)) {}
