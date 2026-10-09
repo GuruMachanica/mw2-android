@@ -15,6 +15,7 @@
 
 #include "android.h"
 #include "../log.h"
+#include "../gpu/vulkan/pipeline.h"
 
 #include <android/native_window.h>
 
@@ -131,6 +132,7 @@ namespace android::detail
     // an application that stops answering.
     void DestroyWindow()
     {
+        vk::pipeline::SaveCache();
         ANativeWindow* going = nullptr;
         {
             std::lock_guard lock(g_lock);

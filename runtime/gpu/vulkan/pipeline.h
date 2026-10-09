@@ -69,6 +69,7 @@ namespace vk::pipeline
     void* SetLayout(uint32_t set);
     void* Layout();
     void* Cache();
+    void  SaveCache();
 
     // Creates and destroys a shader module: a stronger check than spirv-val,
     // because it is the compiler that will actually run the shader.

@@ -9,6 +9,7 @@
 // that never comes up, because that is what a machine with no GPU gives them.
 bool vk::pipeline::Initialise(void*, void*, void*, uint32_t, void*) { return false; }
 void vk::pipeline::Shutdown() {}
+void vk::pipeline::SaveCache() {}
 bool vk::pipeline::Ready() { return false; }
 const char* vk::pipeline::DeviceName() { return "none"; }
 void*    vk::pipeline::Instance() { return nullptr; }
@@ -44,6 +45,9 @@ void vk::pipeline::OnDeviceLost(void (*)(const char*)) {}
 #include <cstring>
 #include <string>
 #include <vector>
+#ifdef MW2_ANDROID
+#include "../../android/android.h"
+#endif
 
 #include <vulkan/vulkan.h>
 #include "loader.h"
@@ -453,8 +457,21 @@ namespace
     // Without it the cache still works, just only within one run.
     const char* CachePath()
     {
-        static const char* path = env::Text("MW2_PIPELINE_CACHE");
-        return path;
+        static std::string pathStr;
+        if (!pathStr.empty()) return pathStr.c_str();
+#ifdef MW2_ANDROID
+        if (!android::GetPaths().cache.empty())
+        {
+            pathStr = android::GetPaths().cache + "/pipeline.vkcache";
+            return pathStr.c_str();
+        }
+#endif
+        if (const char* path = env::Text("MW2_PIPELINE_CACHE"))
+        {
+            pathStr = path;
+            return pathStr.c_str();
+        }
+        return nullptr;
     }
 
     void CreateCache()
@@ -607,6 +624,7 @@ std::mutex& vk::pipeline::QueueMutex() { static std::mutex m; return m; }
 void*    vk::pipeline::SetLayout(uint32_t set) { return set < 3 ? g.sets[set] : nullptr; }
 void*    vk::pipeline::Layout() { return g.layout; }
 void*    vk::pipeline::Cache() { return g.cache; }
+void     vk::pipeline::SaveCache() { ::SaveCache(); }
 
 bool vk::pipeline::CreateModule(const uint32_t* spirv, size_t words, const char** error)
 {
