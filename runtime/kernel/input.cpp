@@ -122,11 +122,17 @@ namespace
     struct Key { SDL_Scancode code; uint16_t bit; };
     constexpr Key kKeys[] = {
         { SDL_SCANCODE_RETURN, BTN_START },   { SDL_SCANCODE_ESCAPE, BTN_BACK },
+        { SDL_SCANCODE_TAB, BTN_BACK },       { SDL_SCANCODE_BACKSPACE, BTN_BACK },
         { SDL_SCANCODE_UP, BTN_DPAD_UP },     { SDL_SCANCODE_DOWN, BTN_DPAD_DOWN },
         { SDL_SCANCODE_LEFT, BTN_DPAD_LEFT }, { SDL_SCANCODE_RIGHT, BTN_DPAD_RIGHT },
-        { SDL_SCANCODE_Z, BTN_A },            { SDL_SCANCODE_X, BTN_B },
-        { SDL_SCANCODE_C, BTN_X },            { SDL_SCANCODE_V, BTN_Y },
-        { SDL_SCANCODE_Q, BTN_LB },           { SDL_SCANCODE_E, BTN_RB },
+        // Standard PC bindings
+        { SDL_SCANCODE_SPACE, BTN_A },        { SDL_SCANCODE_Z, BTN_A },
+        { SDL_SCANCODE_C, BTN_B },            { SDL_SCANCODE_LCTRL, BTN_B }, { SDL_SCANCODE_X, BTN_B },
+        { SDL_SCANCODE_R, BTN_X },            { SDL_SCANCODE_F, BTN_X },
+        { SDL_SCANCODE_1, BTN_Y },            { SDL_SCANCODE_2, BTN_Y },     { SDL_SCANCODE_V, BTN_RTHUMB },
+        { SDL_SCANCODE_LSHIFT, BTN_LTHUMB },
+        { SDL_SCANCODE_Q, BTN_LB },           { SDL_SCANCODE_4, BTN_LB },
+        { SDL_SCANCODE_G, BTN_RB },           { SDL_SCANCODE_E, BTN_RB },
     };
 
     uint16_t KeyboardButtons()
@@ -138,6 +144,39 @@ namespace
         for (const Key& key : kKeys)
             if (keys[key.code]) buttons |= key.bit;
         return buttons;
+    }
+
+    void KeyboardMoveAxes(int16_t& lx, int16_t& ly)
+    {
+        if (!SDL_WasInit(SDL_INIT_VIDEO)) return;
+        const bool* keys = SDL_GetKeyboardState(nullptr);
+        if (!keys) return;
+        int x = 0, y = 0;
+        if (keys[SDL_SCANCODE_W]) y += 32767;
+        if (keys[SDL_SCANCODE_S]) y -= 32767;
+        if (keys[SDL_SCANCODE_D]) x += 32767;
+        if (keys[SDL_SCANCODE_A]) x -= 32767;
+        if (x != 0) lx = int16_t(x);
+        if (y != 0) ly = int16_t(y);
+    }
+
+    uint16_t MouseInputs(uint8_t triggers[2], int16_t& rx, int16_t& ry)
+    {
+        if (!SDL_WasInit(SDL_INIT_VIDEO)) return 0;
+        float dx = 0.0f, dy = 0.0f;
+        const SDL_MouseButtonFlags mouse = SDL_GetRelativeMouseState(&dx, &dy);
+        uint16_t b = 0;
+        if (mouse & SDL_BUTTON_LMASK) triggers[1] = 255;
+        if (mouse & SDL_BUTTON_RMASK) triggers[0] = 255;
+        if (mouse & SDL_BUTTON_MMASK) b |= BTN_RTHUMB;
+
+        if (std::abs(dx) > 0.01f || std::abs(dy) > 0.01f)
+        {
+            const float sens = 3000.0f;
+            rx = int16_t(std::clamp(dx * sens, -32768.0f, 32767.0f));
+            ry = int16_t(std::clamp(-dy * sens, -32768.0f, 32767.0f));
+        }
+        return b;
     }
 
     // MW2_INPUT_SCRIPT="2.5:start,6:a" presses buttons at fixed times, so a title
@@ -348,7 +387,7 @@ PPC_FUNC(__imp__XamInputGetState)
     if (user >= 4) { *out = XInputState{}; ctx.r3.u64 = X_ERROR_DEVICE_NOT_CONNECTED; return; }
     SDL_Gamepad* pad = PadFor(user);
     const uint16_t elsewhere = uint16_t((user == 0 ? KeyboardButtons() : 0) | ScriptedButtons(user));
-    if (pad || elsewhere || (user ? g_scripted[user] : ScriptedAxesHeld(0) || player::Wanted()))
+    if (user == 0 || pad || elsewhere || (user ? g_scripted[user] : ScriptedAxesHeld(0) || player::Wanted()))
     {
 
         if (pad) SDL_UpdateGamepads();
@@ -401,6 +440,13 @@ PPC_FUNC(__imp__XamInputGetState)
                             int16_t(-1 - axis(SDL_GAMEPAD_AXIS_RIGHTY)) };
         if (user == 0)
         {
+            KeyboardMoveAxes(axes[0], axes[1]);
+            b |= MouseInputs(triggers, axes[2], axes[3]);
+            if (axes[1] > 16000) b |= BTN_DPAD_UP;
+            else if (axes[1] < -16000) b |= BTN_DPAD_DOWN;
+            if (axes[0] > 16000) b |= BTN_DPAD_RIGHT;
+            else if (axes[0] < -16000) b |= BTN_DPAD_LEFT;
+
             // What a person did, before the autopilot adds to it: a recorded
             // route keeps the presses (MW2_RECORD_PATH), and every shot is logged.
             player::SawPad(b, triggers[1]);
