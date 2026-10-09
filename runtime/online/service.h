@@ -55,9 +55,16 @@ namespace online
         // reach, and stable for the run.
         virtual uint64_t LocalId() = 0;
         // Who the player is, the same every run: the title keeps the player's
-        // multiplayer rank and settings under it.
+        // multiplayer rank and settings under it. The profile at the first
+        // controller (signin.h), and unique among everyone in a match.
         virtual uint64_t Account() = 0;
-        // What other players see; the title shows the first 15 characters.
+        // What Account() was before there were profiles, the service's own
+        // number for the player, or 0: the kernel moves the rank kept under
+        // that one to Account(), where that has none.
+        virtual uint64_t FormerAccount() { return 0; }
+        // The name the service has for the player, or empty: he then goes by
+        // his profile's.
+        // The title shows the first 15 characters.
         virtual std::string LocalName() = 0;
 
         // Unreliable and unordered, like the UDP the title thinks it has. Ports

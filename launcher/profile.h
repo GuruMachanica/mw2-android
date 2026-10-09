@@ -16,12 +16,26 @@ namespace profile
     // One player's multiplayer stats.
     struct Player
     {
-        // A profile made on the game's sign-in screen (saves/profiles.txt) has
-        // a name there, and no stats file until its first match ends.
+        // A profile (saves/profiles.txt, runtime/signin.h) has a name and a
+        // number there, and no stats file until its first match ends. A
+        // stats file with neither is one no profile owns any more.
         std::string name;
         uint64_t id = 0;
         std::filesystem::path file;
+        // A profile's other stats file, with what it holds: it has one for
+        // split screen and system link with no service, and one the online
+        // service keeps. `file` is the one played last; a change is made to
+        // both.
+        struct Other
+        {
+            std::filesystem::path file;
+            bool offline = false;
+            int level = 1, prestige = 0;
+            std::string played;
+        };
+        std::vector<Other> also;
         bool offline = false;       // the profile nobody signed in to an online service with
+        bool first = false;         // the profile at the first controller
         int level = 1, prestige = 0;
         std::string played;         // the day the file was last written
     };
@@ -29,9 +43,10 @@ namespace profile
     // one played last first.
     std::vector<Player> Players();
 
-    // A new name for a profile of the sign-in screen: up to fifteen letters,
-    // digits and spaces.
+    // A new name for a profile: up to fifteen letters, digits and spaces.
     bool Rename(const Player& player, const std::string& name, std::string& error);
+    // Puts a profile at the first controller, from the game's next start.
+    bool PlayAs(const Player& player, std::string& error);
 
     bool MaxRank(const Player& player, std::string& error);
     bool SetPrestige(const Player& player, int prestige, std::string& error);

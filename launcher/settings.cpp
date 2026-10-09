@@ -11,6 +11,12 @@ namespace
     constexpr const char* kFile = ".env";
     // Every line, so the ones a player wrote by hand are written back.
     std::map<std::string, std::string> g_kept;
+
+    void Save()
+    {
+        std::ofstream file(kFile, std::ios::trunc);
+        for (const auto& [name, value] : g_kept) file << name << '=' << value << '\n';
+    }
 }
 
 void settings::Load()
@@ -35,6 +41,5 @@ int settings::Scale()
 void settings::SetScale(int scale)
 {
     g_kept["MW2_SCALE"] = std::to_string(std::clamp(scale, 1, kMaxScale));
-    std::ofstream file(kFile, std::ios::trunc);
-    for (const auto& [name, value] : g_kept) file << name << '=' << value << '\n';
+    Save();
 }

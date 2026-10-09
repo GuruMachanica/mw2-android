@@ -12,4 +12,5 @@ namespace settings
     constexpr int kMaxScale = 3;
     int Scale();
     void SetScale(int scale);
+
 }

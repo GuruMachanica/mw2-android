@@ -167,9 +167,14 @@ service (diagnostic builds).
 `runtime/online/lan.cpp`: plain UDP on the local network. Each copy sends from a
 port of its own, the first free one above the shared port; broadcasts go to the
 shared port, `MW2_LAN_PORT` (3074). A peer id is the IPv4 address in the top
-bits and the port in the low 16. The player is `MW2_NAME`, or the login name.
-The account is a hash of the name plus the copy's port slot, so a second copy
-on one machine is a second player.
+bits and the port in the low 16.
+
+The account is the profile at the first controller
+([gameplay.md](gameplay.md#signing-in)) plus the copy's port slot, so a second
+copy on one machine is a second player; `MW2_NAME` is another name for him than
+the profile's. The log names the network connections found and the one
+announced, and says so when another machine on the network has the same
+account.
 
 Every copy announces who it is and what can be joined once a second on the
 shared port. `MW2_LAN_JOIN=<name>` joins that player's party or lobby as soon as

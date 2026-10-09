@@ -7,7 +7,9 @@
 // the IPv4 address in the top bits, the port in the low 16. Broadcasts go to a
 // port every copy shares (MW2_LAN_PORT, 3074 by default), which the kernel
 // delivers to all of them; each copy's own port is the first free one after it.
-// The player is MW2_NAME, or the login name.
+// Who the player is, to the title, is the profile at the first controller
+// (signin.h), plus this copy's port slot, so a second copy on one machine is a
+// second player. MW2_NAME is another name for him than the profile's.
 //
 // Xbox LIVE lobbies: every copy says who it is and what can be joined, once a
 // second, to everyone on the shared port. MW2_LAN_JOIN=<name> joins that
@@ -17,6 +19,7 @@
 #include "service.h"
 #include "../env.h"
 #include "../log.h"
+#include "../signin.h"
 
 #include <chrono>
 #include <cstring>
@@ -24,6 +27,7 @@
 #include <map>
 #include <mutex>
 #include <random>
+#include <string>
 #include <vector>
 #include <cstdlib>
 
@@ -71,6 +75,13 @@ namespace
         socklen_t length = sizeof from;
         return long(::recvfrom(s, static_cast<char*>(data), int(size), 0,
                                reinterpret_cast<sockaddr*>(&from), &length));
+    }
+
+    uint64_t Fnv(const std::string& text)
+    {
+        uint64_t hash = 0xCBF29CE484222325ull;   // FNV-1a
+        for (char c : text) hash = (hash ^ uint8_t(c)) * 0x100000001B3ull;
+        return hash;
     }
 
     // The account travels big-endian; every host this runs on is little-endian.
@@ -128,11 +139,12 @@ namespace
         return address;
     }
 
-    // The address other copies reach this one at: the first interface that is up
-    // and not the loopback, or the loopback when there is none.
-    uint32_t OwnAddress()
+    // The network connections that are up, the loopback aside, in the order
+    // the system lists them.
+    struct Adapter { std::string name; uint32_t address; };
+    std::vector<Adapter> Adapters()
     {
-        uint32_t found = INADDR_LOOPBACK;
+        std::vector<Adapter> found;
 #ifdef _WIN32
         ULONG size = 16 * 1024;
         std::vector<uint8_t> buffer(size);
@@ -147,14 +159,17 @@ namespace
         for (auto* at = adapters; at; at = at->Next)
         {
             if (at->OperStatus != IfOperStatusUp || at->IfType == IF_TYPE_SOFTWARE_LOOPBACK) continue;
+            char name[128] = "?";
+            if (at->FriendlyName)
+                WideCharToMultiByte(CP_UTF8, 0, at->FriendlyName, -1, name, sizeof name, nullptr, nullptr);
+            name[sizeof name - 1] = 0;
             for (auto* unicast = at->FirstUnicastAddress; unicast; unicast = unicast->Next)
             {
                 const auto* address = reinterpret_cast<const sockaddr_in*>(unicast->Address.lpSockaddr);
                 if (address->sin_family == AF_INET)
-                    return ntohl(address->sin_addr.s_addr);
+                    found.push_back({ name, ntohl(address->sin_addr.s_addr) });
             }
         }
-        return found;
 #else
         ifaddrs* list = nullptr;
         if (getifaddrs(&list) != 0) return found;
@@ -162,12 +177,32 @@ namespace
         {
             if (!at->ifa_addr || at->ifa_addr->sa_family != AF_INET) continue;
             if (!(at->ifa_flags & IFF_UP) || (at->ifa_flags & IFF_LOOPBACK)) continue;
-            found = ntohl(reinterpret_cast<sockaddr_in*>(at->ifa_addr)->sin_addr.s_addr);
-            break;
+            found.push_back({ at->ifa_name, ntohl(reinterpret_cast<sockaddr_in*>(at->ifa_addr)->sin_addr.s_addr) });
         }
         freeifaddrs(list);
-        return found;
 #endif
+        return found;
+    }
+
+    // The address other copies reach this one at: the first connection that is
+    // up and not the loopback, or the loopback when there is none. The log
+    // names them all: with more than one, the first may not be the one the
+    // other players are on.
+    uint32_t OwnAddress()
+    {
+        const std::vector<Adapter> adapters = Adapters();
+        std::string list;
+        for (const Adapter& adapter : adapters)
+        {
+            in_addr address;
+            address.s_addr = htonl(adapter.address);
+            char text[INET_ADDRSTRLEN];
+            inet_ntop(AF_INET, &address, text, sizeof text);
+            list += (list.empty() ? "" : ", ") + adapter.name + " " + text;
+        }
+        if (adapters.empty()) LOGI("online: no network connection is up; lan stays on this machine");
+        else LOGI("online: network connections: %s; announcing the first", list.c_str());
+        return adapters.empty() ? uint32_t(INADDR_LOOPBACK) : adapters.front().address;
     }
 
     Socket OpenSocket(uint16_t port, bool shared)
@@ -222,9 +257,13 @@ namespace
             bound.sin_addr.s_addr = htonl(OwnAddress());
             id_ = IdOf(bound);
             instance_ = std::random_device{}();
+            const signin::Player player = signin::First();
+            account_ = player.id;
+            // Until there were profiles, the account was made from the name.
             const char* name = env::Text("MW2_NAME");
-            if (!name) name = UserName();
-            name_ = name ? name : "Player";
+            const char* login = name ? name : UserName();
+            former_ = Fnv(login ? login : "Player");
+            name_ = name ? name : player.name;
             if (const char* join = env::Text("MW2_LAN_JOIN")) join_ = join;
             accept_ = env::Flag("MW2_LAN_ACCEPT");
             char text[INET_ADDRSTRLEN];
@@ -237,12 +276,8 @@ namespace
         uint64_t LocalId() override { return id_; }
         // The name, and which copy on this machine this is: the first to start
         // takes the first slot, so a second copy is a second player.
-        uint64_t Account() override
-        {
-            uint64_t hash = 0xCBF29CE484222325ull;   // FNV-1a
-            for (char c : name_) hash = (hash ^ uint8_t(c)) * 0x100000001B3ull;
-            return hash + slot_;
-        }
+        uint64_t Account() override { return account_ + slot_; }
+        uint64_t FormerAccount() override { return former_ + slot_; }
         std::string LocalName() override { return name_; }
 
         bool Send(uint64_t peer, uint16_t fromPort, uint16_t toPort,
@@ -359,6 +394,12 @@ namespace
             Peer& peer = peers_[name];
             peer.id = IdOf(from);
             peer.account = BigEndian64(presence.account);
+            if (peer.account == Account() && !warned_)
+            {
+                warned_ = true;
+                LOGE("online: %s on this network is the same player as this one; on one of the two machines,"
+                     " take the `machine` line out of saves/profiles.txt", name.c_str());
+            }
             peer.joinable = presence.joinable;
             std::memcpy(peer.session, presence.session, sizeof peer.session);
             if (presence.kind != kInvite || !peer.joinable) return;
@@ -423,6 +464,8 @@ namespace
         uint32_t instance_ = 0;
         uint32_t slot_ = 0;
         std::string name_;
+        uint64_t account_ = 0, former_ = 0;
+        bool warned_ = false;                  // told once that another machine has this identity
         std::mutex lock_;
         std::map<uint16_t, std::deque<online::Datagram>> waiting_;
 

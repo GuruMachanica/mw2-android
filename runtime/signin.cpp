@@ -3,6 +3,7 @@
 #include "diagnostics.h"
 #include "log.h"
 #include "kernel/kernel.h"
+#include "env.h"
 
 #include <algorithm>
 #include <atomic>
@@ -12,6 +13,14 @@
 #include <fstream>
 #include <mutex>
 #include <random>
+
+#ifdef _WIN32
+#define WIN32_LEAN_AND_MEAN
+#ifndef NOMINMAX
+#define NOMINMAX
+#endif
+#include <windows.h>
+#endif
 
 #ifdef MW2_SIGNIN_PICTURE
 #define STB_TRUETYPE_IMPLEMENTATION
@@ -56,21 +65,125 @@ namespace
 
     std::filesystem::path File() { return kernel::SaveRoot() / "profiles.txt"; }
 
-    // A line per profile: twelve hexadecimal digits, a space, the name.
-    std::vector<Profile> Profiles()
+    // The file: a line per profile, twelve hexadecimal digits, a space, the
+    // name; `first <the first controller's>`; `machine <where it was written>`.
+    struct Book
     {
         std::vector<Profile> profiles;
+        uint64_t first = 0, machine = 0;
+    };
+    Book Read()
+    {
+        Book book;
         std::ifstream in(File());
         for (std::string line; std::getline(in, line); )
         {
             while (!line.empty() && (line.back() == '\r' || line.back() == ' ')) line.pop_back();
-            if (line.size() < 14 || line[12] != ' ') continue;
             char* end = nullptr;
+            if (line.rfind("first ", 0) == 0) { book.first = std::strtoull(line.c_str() + 6, &end, 16); continue; }
+            if (line.rfind("machine ", 0) == 0) { book.machine = std::strtoull(line.c_str() + 8, &end, 16); continue; }
+            if (line.size() < 14 || line[12] != ' ') continue;
             const uint64_t id = std::strtoull(line.substr(0, 12).c_str(), &end, 16);
             if (!id || *end) continue;
-            profiles.push_back({ id, line.substr(13, 15) });   // a gamertag's longest
+            book.profiles.push_back({ id, line.substr(13, 15) });   // a gamertag's longest
         }
-        return profiles;
+        return book;
+    }
+    std::vector<Profile> Profiles() { return Read().profiles; }
+
+    void Write(const Book& book)
+    {
+        std::error_code ec;
+        std::filesystem::create_directories(kernel::SaveRoot(), ec);
+        std::ofstream out(File(), std::ios::trunc);
+        char line[64];
+        std::snprintf(line, sizeof line, "machine %016llx\nfirst %012llx\n", (unsigned long long)book.machine,
+                      (unsigned long long)book.first);
+        out << line;
+        for (const Profile& profile : book.profiles)
+        {
+            std::snprintf(line, sizeof line, "%012llx %s\n", (unsigned long long)profile.id, profile.name.c_str());
+            out << line;
+        }
+        if (!out) LOGE("signin: cannot write %s", File().string().c_str());
+    }
+
+    // A number no profile of the book has.
+    uint64_t NewId(const Book& book)
+    {
+        std::random_device random;
+        uint64_t id = 0;
+        do id = ((uint64_t(random()) << 32) | random()) & 0xFFFFFFFFFFFFull;
+        while (id < 0x10000 || std::any_of(book.profiles.begin(), book.profiles.end(), [&](const Profile& p) { return p.id == id; }));
+        return id;
+    }
+
+    uint64_t Fnv(const std::string& text)
+    {
+        uint64_t hash = 0xCBF29CE484222325ull;   // FNV-1a
+        for (char c : text) hash = (hash ^ uint8_t(c)) * 0x100000001B3ull;
+        return hash;
+    }
+
+    // This machine among others, as its system names it.
+    uint64_t Machine()
+    {
+        std::string id;
+#ifdef _WIN32
+        char text[64] = {};
+        DWORD size = sizeof text - 1;
+        if (RegGetValueA(HKEY_LOCAL_MACHINE, "SOFTWARE\\Microsoft\\Cryptography", "MachineGuid", RRF_RT_REG_SZ,
+                         nullptr, text, &size) == ERROR_SUCCESS)
+            id = text;
+#else
+        std::ifstream("/etc/machine-id") >> id;
+#endif
+        const uint64_t hash = id.empty() ? 0 : Fnv(id);
+        return hash ? hash : 1;
+    }
+
+    // The profile at the first controller, read or made once a run.
+    Player g_first;
+    const Player& FirstLocked()
+    {
+        if (g_first.signedIn) return g_first;
+        Book book = Read();
+        const uint64_t machine = Machine();
+        bool changed = book.machine != machine;
+        // Written on another machine: these numbers are that machine's players.
+        if (book.machine && book.machine != machine)
+        {
+            for (Profile& profile : book.profiles)
+            {
+                const uint64_t was = profile.id;
+                profile.id = NewId(book);
+                if (book.first == was) book.first = profile.id;
+                kernel::MovePlayerData(was, profile.id);
+            }
+            LOGI("signin: the profiles were another machine's; %zu have new numbers here", book.profiles.size());
+        }
+        book.machine = machine;
+        auto first = std::find_if(book.profiles.begin(), book.profiles.end(), [&](const Profile& p) { return p.id == book.first; });
+        if (first == book.profiles.end())
+        {
+            Profile made;
+            made.id = NewId(book);
+            const char* name = env::Text("MW2_NAME");
+#ifdef _WIN32
+            if (!name) name = std::getenv("USERNAME");
+#else
+            if (!name) name = std::getenv("USER");
+#endif
+            made.name = name && *name ? std::string(name).substr(0, 15) : "Player 1";
+            book.profiles.insert(book.profiles.begin(), made);
+            book.first = made.id;
+            first = book.profiles.begin();
+            changed = true;
+            LOGI("signin: a profile for the first controller, %s", made.name.c_str());
+        }
+        if (changed) Write(book);
+        g_first = { true, first->id, first->name };
+        return g_first;
     }
 
     // "Player 2", or the first number after it nobody has.
@@ -84,9 +197,9 @@ namespace
             if (std::none_of(profiles.begin(), profiles.end(), [&](const Profile& p) { return p.name == made.name; }))
                 break;
         }
-        std::random_device random;
-        do made.id = ((uint64_t(random()) << 32) | random()) & 0xFFFFFFFFFFFFull;
-        while (!made.id || std::any_of(profiles.begin(), profiles.end(), [&](const Profile& p) { return p.id == made.id; }));
+        Book book;
+        book.profiles = profiles;
+        made.id = NewId(book);
 
         std::error_code ec;
         std::filesystem::create_directories(kernel::SaveRoot(), ec);
@@ -149,8 +262,9 @@ namespace
         g_items.clear();
         for (const Profile& profile : Profiles())
         {
-            const bool taken = std::any_of(g_players, g_players + kUsers, [&](const Player& other) {
-                return other.signedIn && other.id == profile.id; });
+            const bool taken = profile.id == FirstLocked().id ||
+                               std::any_of(g_players, g_players + kUsers, [&](const Player& other) {
+                                   return other.signedIn && other.id == profile.id; });
             if (!taken) g_items.push_back({ Item::Existing, profile, profile.name });
         }
         g_items.push_back({ Item::New, {}, "New profile" });
@@ -168,6 +282,12 @@ signin::Player signin::At(uint32_t user)
     if (user == 0 || user >= kUsers) return {};
     std::lock_guard lock(g_lock);
     return g_players[user];
+}
+
+signin::Player signin::First()
+{
+    std::lock_guard lock(g_lock);
+    return FirstLocked();
 }
 
 uint32_t signin::Mask()

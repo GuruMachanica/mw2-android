@@ -72,14 +72,16 @@ Saves go in `saves/` beside the executables.
   game is running.
 - **LAN**: SYSTEM LINK finds games on the network by itself. For private
   matches, the lobby's "Invite friends" invites everyone on the network; start
-  the others with `MW2_LAN_ACCEPT=1`. Your name is your login, or `MW2_NAME=`.
+  the others with `MW2_LAN_ACCEPT=1`.
 
-**More players.** The first controller is you. A second, third or fourth
-controller signs in on the game's sign-in screen, which opens where the game
-asks for it (SIGN IN PROFILE in split screen, SYSTEM LINK) or with the Guide
-button (or Back and Start together): choose a profile, which keeps its own
-rank and settings, or make a new one. The launcher's PROFILE screen renames
-them. Two copies of `mw2-mp` on one PC can play a SYSTEM LINK match, each with
+**Players.** You are a profile, made the first time you play and named after
+your login; your rank is kept under it. The launcher's PROFILE screen renames
+it, and puts another profile in your place. On Steam other players see your
+Steam name. A second, third or fourth controller signs in on the game's
+sign-in screen, which opens where the game asks for it (SIGN IN PROFILE in
+split screen, SYSTEM LINK) or with the Guide button (or Back and Start
+together): choose a profile, which keeps its own rank and settings, or make a
+new one. Two copies of `mw2-mp` on one PC can play a SYSTEM LINK match, each with
 the controller that chose SYSTEM LINK in it.
 
 **Settings**: `MW2_FULLSCREEN=1`, `MW2_SCALE=<2 or 3>` (what RESOLUTION
