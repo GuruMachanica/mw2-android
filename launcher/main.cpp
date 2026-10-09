@@ -16,6 +16,7 @@
 #include "setup.h"
 #include "ui.h"
 #include "update.h"
+#include "spawn.h"
 
 #ifdef _WIN32
 #include <windows.h>
@@ -147,7 +148,7 @@ namespace
         std::error_code ec;
         const std::string path = Utf8(fs::absolute(program, ec));
         const char* const args[] = { path.c_str(), nullptr };
-        SDL_Process* process = SDL_CreateProcess(args, false);
+        SDL_Process* process = spawn::Start(args);
         if (!process) return false;
         SDL_DestroyProcess(process);
         return true;

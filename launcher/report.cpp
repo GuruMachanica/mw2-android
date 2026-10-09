@@ -2,6 +2,7 @@
 #include "disc.h"
 #include "setup.h"
 #include "update.h"
+#include "spawn.h"
 
 #ifdef _WIN32
 #include <windows.h>
@@ -212,11 +213,7 @@ bool report::Start(const char* program, std::string& error)
     SDL_Environment* environment = SDL_CreateEnvironment(true);
     SDL_SetEnvironmentVariable(environment, "MW2_REPORT", "1", true);
     SDL_SetEnvironmentVariable(environment, "MW2_LOG_FILE", log.c_str(), true);
-    SDL_PropertiesID properties = SDL_CreateProperties();
-    SDL_SetPointerProperty(properties, SDL_PROP_PROCESS_CREATE_ARGS_POINTER, const_cast<char**>(args));
-    SDL_SetPointerProperty(properties, SDL_PROP_PROCESS_CREATE_ENVIRONMENT_POINTER, environment);
-    SDL_Process* process = SDL_CreateProcessWithProperties(properties);
-    SDL_DestroyProperties(properties);
+    SDL_Process* process = spawn::Start(args, environment);
     SDL_DestroyEnvironment(environment);
     if (!process) { error = std::string(program) + " could not be started: " + SDL_GetError(); return false; }
     SDL_DestroyProcess(process);

@@ -2,6 +2,7 @@
 #include "disc.h"
 #include "download.h"
 #include "../runtime/install/crypto.h"
+#include "spawn.h"
 
 #include <SDL3/SDL.h>
 
@@ -98,7 +99,7 @@ namespace
     {
         const std::string from = Utf8(archive), to = Utf8(into);
         const char* const args[] = { "tar", "-xf", from.c_str(), "-C", to.c_str(), nullptr };
-        SDL_Process* process = SDL_CreateProcess(args, false);
+        SDL_Process* process = spawn::Start(args);
         if (!process) { error = "The update could not be unpacked: there is no tar program on this system."; return false; }
         int code = -1;
         SDL_WaitProcess(process, true, &code);
