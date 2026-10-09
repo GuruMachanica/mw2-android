@@ -194,23 +194,52 @@ namespace vk::renderer::detail
         blending.attachmentCount = 1;
         blending.pAttachments = &attachment;
 
-        static constexpr VkDynamicState kDynamic[] = {
+        static constexpr VkDynamicState kDynamicModern[] = {
             VK_DYNAMIC_STATE_VIEWPORT, VK_DYNAMIC_STATE_SCISSOR, VK_DYNAMIC_STATE_DEPTH_BIAS,
             VK_DYNAMIC_STATE_STENCIL_COMPARE_MASK, VK_DYNAMIC_STATE_STENCIL_WRITE_MASK,
             VK_DYNAMIC_STATE_STENCIL_REFERENCE, VK_DYNAMIC_STATE_CULL_MODE_EXT,
             VK_DYNAMIC_STATE_FRONT_FACE_EXT, VK_DYNAMIC_STATE_DEPTH_TEST_ENABLE_EXT,
             VK_DYNAMIC_STATE_DEPTH_WRITE_ENABLE_EXT, VK_DYNAMIC_STATE_DEPTH_COMPARE_OP_EXT,
             VK_DYNAMIC_STATE_STENCIL_TEST_ENABLE_EXT, VK_DYNAMIC_STATE_STENCIL_OP_EXT };
-        dynamic.dynamicStateCount = uint32_t(std::size(kDynamic));
-        dynamic.pDynamicStates = kDynamic;
+        static constexpr VkDynamicState kDynamicLegacy[] = {
+            VK_DYNAMIC_STATE_VIEWPORT, VK_DYNAMIC_STATE_SCISSOR, VK_DYNAMIC_STATE_DEPTH_BIAS,
+            VK_DYNAMIC_STATE_STENCIL_COMPARE_MASK, VK_DYNAMIC_STATE_STENCIL_WRITE_MASK,
+            VK_DYNAMIC_STATE_STENCIL_REFERENCE };
 
-        // Dynamic rendering: the formats of the targets stand where a render
-        // pass would.
-        colourFormat = VkFormat(key.colourFormat);
-        rendering.colorAttachmentCount = 1;
-        rendering.pColorAttachmentFormats = &colourFormat;
-        rendering.depthAttachmentFormat = VkFormat(key.depthFormat);
-        rendering.stencilAttachmentFormat = VkFormat(key.depthFormat);
+        if (vk::pipeline::LegacyMode())
+        {
+            dynamic.dynamicStateCount = uint32_t(std::size(kDynamicLegacy));
+            dynamic.pDynamicStates = kDynamicLegacy;
+
+            FacesFor(key.modeCntl, raster.cullMode, raster.frontFace);
+
+            const DepthTests tests = DepthTestsFor(key.depthControl);
+            depth.depthTestEnable = tests.depthTest ? VK_TRUE : VK_FALSE;
+            depth.depthWriteEnable = tests.depthWrite ? VK_TRUE : VK_FALSE;
+            depth.depthCompareOp = tests.depthCompare;
+            depth.stencilTestEnable = tests.stencilTest ? VK_TRUE : VK_FALSE;
+            depth.front.failOp = tests.front.failOp;
+            depth.front.passOp = tests.front.passOp;
+            depth.front.depthFailOp = tests.front.depthFailOp;
+            depth.front.compareOp = tests.front.compareOp;
+            depth.back.failOp = tests.back.failOp;
+            depth.back.passOp = tests.back.passOp;
+            depth.back.depthFailOp = tests.back.depthFailOp;
+            depth.back.compareOp = tests.back.compareOp;
+        }
+        else
+        {
+            dynamic.dynamicStateCount = uint32_t(std::size(kDynamicModern));
+            dynamic.pDynamicStates = kDynamicModern;
+
+            // Dynamic rendering: the formats of the targets stand where a render
+            // pass would.
+            colourFormat = VkFormat(key.colourFormat);
+            rendering.colorAttachmentCount = 1;
+            rendering.pColorAttachmentFormats = &colourFormat;
+            rendering.depthAttachmentFormat = VkFormat(key.depthFormat);
+            rendering.stencilAttachmentFormat = VkFormat(key.depthFormat);
+        }
     }
 
     // The whole pipeline in one call, both shaders compiled for it: what a
@@ -228,7 +257,12 @@ namespace vk::renderer::detail
 
         const PipelineState state(key);
         VkGraphicsPipelineCreateInfo info{ VK_STRUCTURE_TYPE_GRAPHICS_PIPELINE_CREATE_INFO };
-        info.pNext = &state.rendering;
+        info.pNext = vk::pipeline::LegacyMode() ? nullptr : &state.rendering;
+        info.renderPass = vk::pipeline::LegacyMode()
+            ? GetRenderPass(VkFormat(key.colourFormat), VkFormat(key.depthFormat),
+                            VkSampleCountFlagBits(std::max(key.samples, 1u)))
+            : VK_NULL_HANDLE;
+        info.subpass = 0;
         info.stageCount = 2;
         info.pStages = stages;
         info.pVertexInputState = &state.input;

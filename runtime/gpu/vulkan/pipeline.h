@@ -50,6 +50,12 @@ namespace vk::pipeline
     // Whether shaders can be compiled on their own as pipeline libraries and
     // linked quickly (VK_EXT_graphics_pipeline_library with fast linking).
     bool     PipelineLibraries();
+    // Whether the device supports dynamic rendering (VK_KHR_dynamic_rendering or core 1.3).
+    bool     HasDynamicRendering();
+    // Whether the device supports extended dynamic state (VK_EXT_extended_dynamic_state or core 1.3).
+    bool     HasExtendedDynamicState();
+    // Whether the device runs under the legacy Vulkan 1.1 fallback path (traditional VkRenderPass/VkFramebuffer).
+    bool     LegacyMode();
 
     // The device has one queue, and the window thread and the GPU thread both
     // submit to it; Vulkan requires a queue to be externally synchronised.

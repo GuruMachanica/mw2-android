@@ -21,6 +21,9 @@ bool     vk::pipeline::PreciseOcclusionQueries() { return false; }
 float    vk::pipeline::MaxAnisotropy() { return 1.0f; }
 bool     vk::pipeline::NonSeamlessCubes() { return false; }
 bool     vk::pipeline::PipelineLibraries() { return false; }
+bool     vk::pipeline::HasDynamicRendering() { return false; }
+bool     vk::pipeline::HasExtendedDynamicState() { return false; }
+bool     vk::pipeline::LegacyMode() { return false; }
 std::mutex& vk::pipeline::QueueMutex() { static std::mutex m; return m; }
 void*    vk::pipeline::SetLayout(uint32_t) { return nullptr; }
 void*    vk::pipeline::Layout() { return nullptr; }
@@ -77,6 +80,9 @@ namespace
         float maxAnisotropy = 1.0f;
         bool nonSeamlessCubes = false;
         bool pipelineLibraries = false, fastLinking = false;
+        bool hasDynamicRendering = false;
+        bool hasExtendedDynamicState = false;
+        bool legacyMode = false;
         std::string name = "none";
 
         VkDescriptorSetLayout sets[3]{};
@@ -246,6 +252,10 @@ bool vk::pipeline::CreateDevice(void* physicalDevice, uint32_t family,
     const bool hasDynamicState =
         dynamicState.extendedDynamicState && (dynamicStateExtension || core13);
 
+    g.hasDynamicRendering = hasDynamicRendering;
+    g.hasExtendedDynamicState = hasDynamicState;
+    g.legacyMode = !hasDynamicRendering || !hasDynamicState;
+
     LOGI("vulkan: device reports Vulkan %u.%u.%u; dynamic rendering %s (extension %s),"
          " extended dynamic state %s (extension %s)",
          VK_VERSION_MAJOR(deviceProperties.apiVersion),
@@ -256,16 +266,15 @@ bool vk::pipeline::CreateDevice(void* physicalDevice, uint32_t family,
          dynamicState.extendedDynamicState ? "yes" : "no",
          dynamicStateExtension ? "yes" : "no");
 
-    if (!hasDynamicRendering || !hasDynamicState)
+    if (g.legacyMode)
     {
-        LOGW("vulkan: the device lacks %s, which the renderer needs",
-             !hasDynamicRendering && !hasDynamicState ? "dynamic rendering and extended dynamic state"
-             : !hasDynamicRendering ? "dynamic rendering" : "extended dynamic state");
-        return false;
+        LOGI("vulkan: legacy Vulkan 1.1 fallback active: classic VkRenderPass and static pipeline states");
     }
+
     if (dynamicRenderingExtension) extensions.push_back(VK_KHR_DYNAMIC_RENDERING_EXTENSION_NAME);
     if (dynamicStateExtension) extensions.push_back(VK_EXT_EXTENDED_DYNAMIC_STATE_EXTENSION_NAME);
     g.pipelineLibraries =
+        !g.legacyMode &&
         DeviceHasExtension(physical, VK_KHR_PIPELINE_LIBRARY_EXTENSION_NAME) &&
         DeviceHasExtension(physical, VK_EXT_GRAPHICS_PIPELINE_LIBRARY_EXTENSION_NAME) &&
         libraries.graphicsPipelineLibrary;
@@ -281,10 +290,23 @@ bool vk::pipeline::CreateDevice(void* physicalDevice, uint32_t family,
         g.fastLinking = linking.graphicsPipelineLibraryFastLinking;
     }
     else libraries.graphicsPipelineLibrary = VK_FALSE;
-    dynamicRendering.pNext = &dynamicState;
-    dynamicState.pNext = g.pipelineLibraries ? static_cast<void*>(&libraries) : features;
-    libraries.pNext = features;
-    void* chain = &dynamicRendering;
+
+    void* chain = features;
+    if (g.pipelineLibraries)
+    {
+        libraries.pNext = chain;
+        chain = &libraries;
+    }
+    if (hasDynamicState || dynamicStateExtension || core13)
+    {
+        dynamicState.pNext = chain;
+        chain = &dynamicState;
+    }
+    if (hasDynamicRendering || dynamicRenderingExtension || core13)
+    {
+        dynamicRendering.pNext = chain;
+        chain = &dynamicRendering;
+    }
 
     VkDeviceCreateInfo info{ VK_STRUCTURE_TYPE_DEVICE_CREATE_INFO };
     info.pNext = chain;
@@ -620,6 +642,9 @@ bool     vk::pipeline::PipelineLibraries()
     static const bool refused = env::Flag("MW2_NO_PIPELINE_LIBRARIES");
     return g.pipelineLibraries && g.fastLinking && !refused;
 }
+bool     vk::pipeline::HasDynamicRendering() { return g.hasDynamicRendering; }
+bool     vk::pipeline::HasExtendedDynamicState() { return g.hasExtendedDynamicState; }
+bool     vk::pipeline::LegacyMode() { return g.legacyMode; }
 std::mutex& vk::pipeline::QueueMutex() { static std::mutex m; return m; }
 void*    vk::pipeline::SetLayout(uint32_t set) { return set < 3 ? g.sets[set] : nullptr; }
 void*    vk::pipeline::Layout() { return g.layout; }

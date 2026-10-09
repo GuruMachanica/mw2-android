@@ -149,7 +149,10 @@ namespace vk::renderer::detail
         CloseGuestQuery();
         if (g.currentColour)
             Record([](VkCommandBuffer command) {
-                dispatch.endRendering(command);
+                if (vk::pipeline::LegacyMode())
+                    vkCmdEndRenderPass(command);
+                else
+                    dispatch.endRendering(command);
                 // What a render pass's dependency out to the outside was: the
                 // copies, clears, passes and sampling after it see its writes.
                 VkMemoryBarrier after{ VK_STRUCTURE_TYPE_MEMORY_BARRIER };

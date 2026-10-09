@@ -245,8 +245,12 @@ bool vk::renderer::Initialise()
     if (!dispatch.beginRendering || !dispatch.endRendering || !dispatch.setCullMode ||
         !dispatch.setStencilOp)
     {
-        LOGW("renderer: the device did not give dynamic rendering or dynamic state commands");
-        return false;
+        if (!vk::pipeline::LegacyMode())
+        {
+            LOGW("renderer: the device did not give dynamic rendering or dynamic state commands");
+            return false;
+        }
+        LOGI("renderer: running in legacy mode without dynamic rendering / dynamic state commands");
     }
 
     VkDescriptorPoolSize sizes[2]{};
@@ -334,6 +338,7 @@ void vk::renderer::Shutdown()
     vk::display::Shutdown();
     WriteShaderCache();
     SummariseTargets();
+    ClearRenderPassCache();
     g.pipelineCount = g.pipelines.size();
     g.shaderCount = g.shaders.size();
     for (auto& [key, pipeline] : g.pipelines) if (pipeline) vkDestroyPipeline(g.device, pipeline, nullptr);

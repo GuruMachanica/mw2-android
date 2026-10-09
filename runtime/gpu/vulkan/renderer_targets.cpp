@@ -175,6 +175,7 @@ namespace vk::renderer::detail
 
     void DestroyTarget(Target& target)
     {
+        InvalidateFramebuffers();
         if (target.view) vkDestroyImageView(g.device, target.view, nullptr);
         if (target.image) vkDestroyImage(g.device, target.image, nullptr);
         if (target.memory) vkFreeMemory(g.device, target.memory, nullptr);
@@ -408,12 +409,122 @@ namespace vk::renderer::detail
         return &stored;
     }
 
+    VkRenderPass GetRenderPass(VkFormat colourFormat, VkFormat depthFormat, VkSampleCountFlagBits samples)
+    {
+        const RenderPassKey key{ colourFormat, depthFormat, samples };
+        auto found = g.legacyRenderPasses.find(key);
+        if (found != g.legacyRenderPasses.end()) return found->second;
+
+        VkAttachmentDescription attachments[2]{};
+        uint32_t count = 0;
+
+        VkAttachmentReference colourRef{ VK_ATTACHMENT_UNUSED, VK_IMAGE_LAYOUT_UNDEFINED };
+        if (colourFormat != VK_FORMAT_UNDEFINED)
+        {
+            colourRef = { count, VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL };
+            VkAttachmentDescription& desc = attachments[count++];
+            desc.format = colourFormat;
+            desc.samples = samples;
+            desc.loadOp = VK_ATTACHMENT_LOAD_OP_LOAD;
+            desc.storeOp = VK_ATTACHMENT_STORE_OP_STORE;
+            desc.stencilLoadOp = VK_ATTACHMENT_LOAD_OP_DONT_CARE;
+            desc.stencilStoreOp = VK_ATTACHMENT_STORE_OP_DONT_CARE;
+            desc.initialLayout = VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL;
+            desc.finalLayout = VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL;
+        }
+
+        VkAttachmentReference depthRef{ VK_ATTACHMENT_UNUSED, VK_IMAGE_LAYOUT_UNDEFINED };
+        if (depthFormat != VK_FORMAT_UNDEFINED)
+        {
+            depthRef = { count, VK_IMAGE_LAYOUT_DEPTH_STENCIL_ATTACHMENT_OPTIMAL };
+            VkAttachmentDescription& desc = attachments[count++];
+            desc.format = depthFormat;
+            desc.samples = samples;
+            desc.loadOp = VK_ATTACHMENT_LOAD_OP_LOAD;
+            desc.storeOp = VK_ATTACHMENT_STORE_OP_STORE;
+            desc.stencilLoadOp = VK_ATTACHMENT_LOAD_OP_LOAD;
+            desc.stencilStoreOp = VK_ATTACHMENT_STORE_OP_STORE;
+            desc.initialLayout = VK_IMAGE_LAYOUT_DEPTH_STENCIL_ATTACHMENT_OPTIMAL;
+            desc.finalLayout = VK_IMAGE_LAYOUT_DEPTH_STENCIL_ATTACHMENT_OPTIMAL;
+        }
+
+        VkSubpassDescription subpass{};
+        subpass.pipelineBindPoint = VK_PIPELINE_BIND_POINT_GRAPHICS;
+        subpass.colorAttachmentCount = (colourFormat != VK_FORMAT_UNDEFINED) ? 1 : 0;
+        subpass.pColorAttachments = (colourFormat != VK_FORMAT_UNDEFINED) ? &colourRef : nullptr;
+        subpass.pDepthStencilAttachment = (depthFormat != VK_FORMAT_UNDEFINED) ? &depthRef : nullptr;
+
+        VkRenderPassCreateInfo info{ VK_STRUCTURE_TYPE_RENDER_PASS_CREATE_INFO };
+        info.attachmentCount = count;
+        info.pAttachments = attachments;
+        info.subpassCount = 1;
+        info.pSubpasses = &subpass;
+
+        VkRenderPass pass = VK_NULL_HANDLE;
+        if (vkCreateRenderPass(g.device, &info, nullptr, &pass) != VK_SUCCESS)
+            return VK_NULL_HANDLE;
+
+        g.legacyRenderPasses[key] = pass;
+        return pass;
+    }
+
+    VkFramebuffer GetFramebuffer(VkRenderPass pass, VkImageView colourView, VkImageView depthView,
+                                 uint32_t width, uint32_t height)
+    {
+        const FramebufferKey key{ pass, colourView, depthView, width, height };
+        auto found = g.legacyFramebuffers.find(key);
+        if (found != g.legacyFramebuffers.end()) return found->second;
+
+        VkImageView views[2]{};
+        uint32_t count = 0;
+        if (colourView) views[count++] = colourView;
+        if (depthView) views[count++] = depthView;
+
+        VkFramebufferCreateInfo info{ VK_STRUCTURE_TYPE_FRAMEBUFFER_CREATE_INFO };
+        info.renderPass = pass;
+        info.attachmentCount = count;
+        info.pAttachments = views;
+        info.width = width;
+        info.height = height;
+        info.layers = 1;
+
+        VkFramebuffer fb = VK_NULL_HANDLE;
+        if (vkCreateFramebuffer(g.device, &info, nullptr, &fb) != VK_SUCCESS)
+            return VK_NULL_HANDLE;
+
+        g.legacyFramebuffers[key] = fb;
+        return fb;
+    }
+
+    void InvalidateFramebuffers()
+    {
+        for (auto& [k, fb] : g.legacyFramebuffers)
+            if (fb) vkDestroyFramebuffer(g.device, fb, nullptr);
+        g.legacyFramebuffers.clear();
+    }
+
+    void ClearRenderPassCache()
+    {
+        InvalidateFramebuffers();
+        for (auto& [k, pass] : g.legacyRenderPasses)
+            if (pass) vkDestroyRenderPass(g.device, pass, nullptr);
+        g.legacyRenderPasses.clear();
+    }
+
     void BeginRendering(const Target& colour, const Target& depth, uint32_t width,
                         uint32_t height)
     {
         EndPass();
         const VkImageView colourView = colour.view, depthView = depth.view;
         const VkExtent2D area = Scaled(VkExtent2D{ width, height });
+        const bool legacy = vk::pipeline::LegacyMode();
+        VkRenderPass legacyPass = VK_NULL_HANDLE;
+        VkFramebuffer legacyFb = VK_NULL_HANDLE;
+        if (legacy)
+        {
+            legacyPass = GetRenderPass(colour.format, depth.format, colour.samples);
+            legacyFb = GetFramebuffer(legacyPass, colourView, depthView, area.width, area.height);
+        }
         Record([=](VkCommandBuffer command) {
             // What a render pass's dependency in from the outside was: a frame
             // is many passes over the same attachments, with copies and clears
@@ -427,25 +538,36 @@ namespace vk::renderer::detail
                                  kColourStages | kDepthStages | VK_PIPELINE_STAGE_TRANSFER_BIT,
                                  kColourStages | kDepthStages, 0, 1, &before, 0, nullptr, 0,
                                  nullptr);
-            // LOAD, not CLEAR: a frame is many rendering instances -- one per
-            // change of target -- and only the title's own draws clear anything.
-            VkRenderingAttachmentInfoKHR colourAttachment{
-                VK_STRUCTURE_TYPE_RENDERING_ATTACHMENT_INFO_KHR };
-            colourAttachment.imageView = colourView;
-            colourAttachment.imageLayout = VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL;
-            colourAttachment.loadOp = VK_ATTACHMENT_LOAD_OP_LOAD;
-            colourAttachment.storeOp = VK_ATTACHMENT_STORE_OP_STORE;
-            VkRenderingAttachmentInfoKHR depthAttachment = colourAttachment;
-            depthAttachment.imageView = depthView;
-            depthAttachment.imageLayout = VK_IMAGE_LAYOUT_DEPTH_STENCIL_ATTACHMENT_OPTIMAL;
-            VkRenderingInfoKHR info{ VK_STRUCTURE_TYPE_RENDERING_INFO_KHR };
-            info.renderArea.extent = area;
-            info.layerCount = 1;
-            info.colorAttachmentCount = 1;
-            info.pColorAttachments = &colourAttachment;
-            info.pDepthAttachment = &depthAttachment;
-            info.pStencilAttachment = &depthAttachment;
-            dispatch.beginRendering(command, &info);
+            if (legacy)
+            {
+                VkRenderPassBeginInfo beginInfo{ VK_STRUCTURE_TYPE_RENDER_PASS_BEGIN_INFO };
+                beginInfo.renderPass = legacyPass;
+                beginInfo.framebuffer = legacyFb;
+                beginInfo.renderArea.extent = area;
+                vkCmdBeginRenderPass(command, &beginInfo, VK_SUBPASS_CONTENTS_INLINE);
+            }
+            else
+            {
+                // LOAD, not CLEAR: a frame is many rendering instances -- one per
+                // change of target -- and only the title's own draws clear anything.
+                VkRenderingAttachmentInfoKHR colourAttachment{
+                    VK_STRUCTURE_TYPE_RENDERING_ATTACHMENT_INFO_KHR };
+                colourAttachment.imageView = colourView;
+                colourAttachment.imageLayout = VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL;
+                colourAttachment.loadOp = VK_ATTACHMENT_LOAD_OP_LOAD;
+                colourAttachment.storeOp = VK_ATTACHMENT_STORE_OP_STORE;
+                VkRenderingAttachmentInfoKHR depthAttachment = colourAttachment;
+                depthAttachment.imageView = depthView;
+                depthAttachment.imageLayout = VK_IMAGE_LAYOUT_DEPTH_STENCIL_ATTACHMENT_OPTIMAL;
+                VkRenderingInfoKHR info{ VK_STRUCTURE_TYPE_RENDERING_INFO_KHR };
+                info.renderArea.extent = area;
+                info.layerCount = 1;
+                info.colorAttachmentCount = 1;
+                info.pColorAttachments = &colourAttachment;
+                info.pDepthAttachment = &depthAttachment;
+                info.pStencilAttachment = &depthAttachment;
+                dispatch.beginRendering(command, &info);
+            }
         });
         OpenGuestQuery();
         g.currentColour = colour.view;

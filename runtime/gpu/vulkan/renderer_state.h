@@ -85,6 +85,8 @@ namespace vk::renderer::detail
         uint32_t blendControl = 0;
         uint32_t colourMask = 0;
         uint32_t samples = 1;   // the render pass's, so the rasteriser matches it
+        uint32_t depthControl = 0; // for legacy mode where depth/stencil is static
+        uint32_t modeCntl = 0;     // for legacy mode where cull/frontface is static
         auto operator<=>(const PipelineKey&) const = default;
     };
 
@@ -140,6 +142,24 @@ namespace vk::renderer::detail
         uint32_t blendControl = 0, colourMask = 0;
         uint32_t colourFormat = 0, depthFormat = 0, samples = 1;
         auto operator<=>(const OutputKey&) const = default;
+    };
+
+    struct RenderPassKey
+    {
+        VkFormat colourFormat = VK_FORMAT_UNDEFINED;
+        VkFormat depthFormat = VK_FORMAT_UNDEFINED;
+        VkSampleCountFlagBits samples = VK_SAMPLE_COUNT_1_BIT;
+        auto operator<=>(const RenderPassKey&) const = default;
+    };
+
+    struct FramebufferKey
+    {
+        VkRenderPass pass = VK_NULL_HANDLE;
+        VkImageView colourView = VK_NULL_HANDLE;
+        VkImageView depthView = VK_NULL_HANDLE;
+        uint32_t width = 0;
+        uint32_t height = 0;
+        auto operator<=>(const FramebufferKey&) const = default;
     };
 
     // A pipeline a previous run needed, with the formats its render pass was
@@ -392,6 +412,8 @@ namespace vk::renderer::detail
 
         std::unordered_map<uint32_t, ResolveRing> resolvedTo;
         std::map<uint32_t, ResolveSurface> resolveSurfaces;
+        std::map<RenderPassKey, VkRenderPass> legacyRenderPasses;
+        std::map<FramebufferKey, VkFramebuffer> legacyFramebuffers;
 
         uint64_t frames = 0, draws = 0, drawsRecorded = 0;
 
@@ -584,6 +606,13 @@ namespace vk::renderer::detail
     void EndReadingDepth(Target& target);
     void ClearAliasedDepth(uint32_t fromTile);
     void ClearAfterResolve(const gpu::RegisterFile& r, const gpu::CopyControl& control);
+
+    // Traditional render pass and framebuffer fallback for Vulkan 1.1 / Mali
+    VkRenderPass GetRenderPass(VkFormat colourFormat, VkFormat depthFormat, VkSampleCountFlagBits samples);
+    VkFramebuffer GetFramebuffer(VkRenderPass pass, VkImageView colourView, VkImageView depthView,
+                                 uint32_t width, uint32_t height);
+    void InvalidateFramebuffers();
+    void ClearRenderPassCache();
 
     // ---- renderer_frame.cpp ----
     bool BeginFrame();

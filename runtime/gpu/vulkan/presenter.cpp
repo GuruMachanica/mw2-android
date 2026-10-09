@@ -1079,7 +1079,7 @@ namespace
             return false;
         }
         if (!CreateDevice()) {
-            android::SetStatus("GPU lacks Vulkan 1.3 or dynamic rendering support");
+            android::SetStatus("Failed to create Vulkan logical device");
             return false;
         }
         if (!CreateSwapchain()) {

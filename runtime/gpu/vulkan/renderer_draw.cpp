@@ -174,20 +174,23 @@ namespace vk::renderer::detail
             if (set & kDepthBias) vkCmdSetDepthBias(command, depthBias[0], 0.0f, depthBias[1]);
             if (set & kFaces)
             {
-                dispatch.setCullMode(command, cullMode);
-                dispatch.setFrontFace(command, frontFace);
+                if (dispatch.setCullMode) dispatch.setCullMode(command, cullMode);
+                if (dispatch.setFrontFace) dispatch.setFrontFace(command, frontFace);
             }
             if (set & kDepthTests)
             {
                 const DepthTests& d = depthTests;
-                dispatch.setDepthTestEnable(command, d.depthTest);
-                dispatch.setDepthWriteEnable(command, d.depthWrite);
-                dispatch.setDepthCompareOp(command, d.depthCompare);
-                dispatch.setStencilTestEnable(command, d.stencilTest);
-                dispatch.setStencilOp(command, VK_STENCIL_FACE_FRONT_BIT, d.front.failOp,
-                                      d.front.passOp, d.front.depthFailOp, d.front.compareOp);
-                dispatch.setStencilOp(command, VK_STENCIL_FACE_BACK_BIT, d.back.failOp,
-                                      d.back.passOp, d.back.depthFailOp, d.back.compareOp);
+                if (dispatch.setDepthTestEnable)
+                {
+                    dispatch.setDepthTestEnable(command, d.depthTest);
+                    dispatch.setDepthWriteEnable(command, d.depthWrite);
+                    dispatch.setDepthCompareOp(command, d.depthCompare);
+                    dispatch.setStencilTestEnable(command, d.stencilTest);
+                    dispatch.setStencilOp(command, VK_STENCIL_FACE_FRONT_BIT, d.front.failOp,
+                                          d.front.passOp, d.front.depthFailOp, d.front.compareOp);
+                    dispatch.setStencilOp(command, VK_STENCIL_FACE_BACK_BIT, d.back.failOp,
+                                          d.back.passOp, d.back.depthFailOp, d.back.compareOp);
+                }
             }
             if (set & kStencil)
             {
@@ -485,6 +488,11 @@ void vk::renderer::Draw(const gpu::RegisterFile& r, const DrawCall& call)
     key.blendControl = r[gpu::RB_BLENDCONTROL0];
     key.colourMask = r[gpu::RB_COLOR_MASK];
     key.samples = colourTarget->samples;
+    if (vk::pipeline::LegacyMode())
+    {
+        key.depthControl = depthControl;
+        key.modeCntl = modeCntl;
+    }
     bool newPipeline = false;
     VkPipeline built = [&] { Stopwatch watch(g.pipelineNanoseconds);
                              return EnsurePipeline(key, *vertex, *pixel, &newPipeline); }();
