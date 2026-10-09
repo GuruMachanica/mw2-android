@@ -14,14 +14,20 @@ non_volatile_as_local = false
 
 # The multiplayer's copies of the register save/restore helpers, found by
 # searching default_mp.pe for the campaign's helper bodies (each is unique).
-restgprlr_14_address = 0x824196B0
-savegprlr_14_address = 0x82419660
-restfpr_14_address   = 0x8241975C
-savefpr_14_address   = 0x82419710
-restvmx_14_address   = 0x8241AF78
-savevmx_14_address   = 0x8241ACE0
-restvmx_64_address   = 0x8241B00C
-savevmx_64_address   = 0x8241AD74
+restgprlr_14_address = 0x8241A790
+savegprlr_14_address = 0x8241A740
+restfpr_14_address   = 0x8241A83C
+savefpr_14_address   = 0x8241A7F0
+restvmx_14_address   = 0x8241C058
+savevmx_14_address   = 0x8241BDC0
+restvmx_64_address   = 0x8241C0EC
+savevmx_64_address   = 0x8241BE54
+
+# The C runtime's setjmp and longjmp. Com_Error leaves an error with longjmp to
+# the setjmp of the thread's frame loop; recompiled as ordinary functions, the
+# longjmp returned into the code that raised the error instead.
+setjmp_address  = 0x8241C710
+longjmp_address = 0x8241D470
 
 # Leaf functions (no stack frame, hence absent from .pdata) that contain jump
 # tables. The analyzer ends them early because a table dispatch looks like a
@@ -31,29 +37,29 @@ functions = [
     # Compact branch ladders that XenonAnalyse splits into several functions;
     # the branch targets inside are fallthrough labels, not entry points. Each
     # runs to the padding after its last blr.
-    { address = 0x82148840, size = 0x44 },
-    { address = 0x8210F578, size = 0x9C },
+    { address = 0x821486B8, size = 0x44 },
+    { address = 0x8210F468, size = 0x9C },
 
     { address = 0x820CC0F8, size = 0xA8 },
-    { address = 0x82115BC8, size = 0x60 },
-    { address = 0x82115C28, size = 0x70 },
-    { address = 0x82157668, size = 0x9C },
-    { address = 0x821AA5B0, size = 0x118 },
-    { address = 0x821AA6F0, size = 0x114 },
-    { address = 0x821AA890, size = 0x3B8 },
-    { address = 0x82290A40, size = 0x64 },
-    { address = 0x822DCF60, size = 0xD4 },
-    { address = 0x822EAB38, size = 0x88 },
-    { address = 0x822F2BC8, size = 0xE0 },
-    { address = 0x822F41F8, size = 0x94 },
-    { address = 0x82300320, size = 0xD0 },
-    { address = 0x823006A0, size = 0x64 },
-    { address = 0x82300708, size = 0x74 },
-    { address = 0x82300788, size = 0x60 },
-    { address = 0x823007E8, size = 0x78 },
-    { address = 0x82300860, size = 0x68 },
-    { address = 0x8230BE88, size = 0x20C },
-    { address = 0x8230C098, size = 0x1E0 },
-    { address = 0x8230F468, size = 0x1B0 },
-    { address = 0x823FD978, size = 0x14C },
+    { address = 0x82115AA8, size = 0x60 },
+    { address = 0x82115B08, size = 0x70 },
+    { address = 0x82157640, size = 0x9C },
+    { address = 0x821AABB0, size = 0x118 },
+    { address = 0x821AACF0, size = 0x114 },
+    { address = 0x821AAE90, size = 0x3B8 },
+    { address = 0x82291288, size = 0x64 },
+    { address = 0x822DD760, size = 0xD4 },
+    { address = 0x822EB578, size = 0x88 },
+    { address = 0x822F3700, size = 0xE0 },
+    { address = 0x822F4D30, size = 0x94 },
+    { address = 0x82300E58, size = 0xD0 },
+    { address = 0x823011D8, size = 0x64 },
+    { address = 0x82301240, size = 0x74 },
+    { address = 0x823012C0, size = 0x60 },
+    { address = 0x82301320, size = 0x78 },
+    { address = 0x82301398, size = 0x68 },
+    { address = 0x8230C9D8, size = 0x20C },
+    { address = 0x8230CBE8, size = 0x1E0 },
+    { address = 0x8230FFB8, size = 0x1B0 },
+    { address = 0x823FEA58, size = 0x14C },
 ]

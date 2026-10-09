@@ -3,6 +3,7 @@
 #include "guest_memory.h"
 #include "guest.h"
 #include "log.h"
+#include "stutters.h"
 #include "diagnostics.h"
 #include "env.h"
 #include "kernel/kernel.h"
@@ -18,6 +19,8 @@
 #include "install/install.h"
 #include "platform.h"
 #include "run.h"
+#include "report.h"
+#include "settings.h"
 
 #include <unistd.h>
 
@@ -35,6 +38,7 @@
 // same question, so they print the same reports.
 static void ReportAll()
 {
+    report::Write();
     if constexpr (!diag::kOn) return;
     kernel::ReportUnimplemented();
     kernel::ReportMissingFiles();
@@ -58,8 +62,10 @@ void crash::RequestExit(const char* why)
     std::thread([why] {
         LOGI("--------------------------------------------------");
         LOGI("exiting: %s", why);
+        stutters::Ending();
         gpu::Shutdown();
         ReportAll();
+        install::StartNextTitle();
         std::fflush(nullptr);
         _exit(0);
     }).detach();
@@ -146,6 +152,9 @@ int mw2::Run(int argc, char** argv)
 {
     platform::Initialise();
 
+    // Before any switch is read, the log's among them.
+    const std::string kept = settings::Load(install::Folder(argc, argv) / ".env");
+
     // MW2_LOG_FILE=<path> sends the log there instead of the terminal. Every
     // line this runtime writes goes to stderr, so a plain `> file` redirection
     // catches nothing.
@@ -157,7 +166,9 @@ int mw2::Run(int argc, char** argv)
         std::error_code ignored;
         if (const auto folder = std::filesystem::path(logPath).parent_path(); !folder.empty())
             std::filesystem::create_directories(folder, ignored);
-        if (!std::freopen(logPath, "w", stderr))
+        // A title the other one started (from its menus) carries on in the
+        // log of the run it belongs to.
+        if (!std::freopen(logPath, env::Flag("MW2_LOG_APPEND") ? "a" : "w", stderr))
             std::fprintf(stdout, "could not open %s for the log\n", logPath);
         // A line at a time, as stderr is to a terminal: the file is read while
         // the run goes on, and a line held back is a line a watcher never sees.
@@ -173,6 +184,7 @@ int mw2::Run(int argc, char** argv)
 #endif  // MW2_ANDROID
 
     LOGI("--- MW2 recompilation runtime (%s) ---", MW2_TITLE_NAME);
+    if (!kept.empty()) LOGI("settings: %s", kept.c_str());
 
     // A player starts the executable with no arguments (runtime/install/); a
     // development run names the image, a flat PE or the XEX, and the game folder.

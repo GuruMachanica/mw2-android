@@ -9,6 +9,7 @@ would sample at the moment a draw executes.
 | Fetch constant, tiling, level layout, untiling | `runtime/gpu/texture.{h,cpp}` |
 | Xenos to Vulkan formats and swizzles | `runtime/gpu/vulkan/texture_formats.{h,cpp}` |
 | Images, samplers, descriptor sets, re-reads | `runtime/gpu/vulkan/texture_cache.{h,cpp}` |
+| The images' memory, in blocks | `runtime/gpu/vulkan/image_memory.{h,cpp}` |
 | Write watch on guest pages | `runtime/gpu/memory_watch.{h,cpp}` |
 | The image pool's block copy | `runtime/image_move.{h,cpp}` |
 | Upload round-trip test | `tools/upload_texture.cpp` (target `upload-texture`) |
@@ -167,14 +168,37 @@ describes, uploading it the first time it is seen.
 - **Resolved render targets** that the title samples back are not read from
   memory; the renderer lends the resolve's view (`Adopt`), see
   [rendering.md](rendering.md).
-- **Budget.** Past half the device-local memory (or `MW2_TEXTURE_BUDGET_MB`),
-  `NewFrame` evicts the textures bound longest ago, none bound in the last ten
-  seconds, down to three quarters of the budget, and resets the descriptor
-  pools.
+- **One image per texture.** An id is an image and a sampler. The six fetch
+  dwords less the sampler's bits (clamps, filters, anisotropy, border colour)
+  name the image, so a texture bound under several sampler states is held
+  once.
+- **Memory** comes from 64 MB blocks (`image_memory.cpp`), a range per image.
+  A level streams tens of thousands of small textures through the cache, and
+  an allocation each is what a driver is worst at: freeing one took over half
+  a millisecond with forty thousand live. Anything over a quarter of a block
+  gets an allocation of its own.
+- **Letting go.** The console holds no copies: when the title puts another
+  texture where one was, the old one is gone. `NewFrame` looks over the cache
+  once every 64 frames, a slice of the images a frame:
+  - An image is *idle* once unbound for 600 frames, which is past any
+    submission still running, plus one round of the sweep.
+  - An idle image whose pages the write watch saw written, and whose bytes
+    then sign differently, is released. Bound again it would have had to be
+    read again anyway. This is what keeps the cache near what the level is
+    using: without it a streaming level left two gigabytes of such copies in
+    seven minutes.
+  - Past the budget (half the device-local memory, or
+    `MW2_TEXTURE_BUDGET_MB`) the idle images bound longest ago go, down to
+    three quarters of it.
+  - A descriptor set not handed out for 600 frames is freed back to its pool.
+    A set is used no later than its images are bound, so an idle image has no
+    set left.
+  - Released images are destroyed a few a frame (half a millisecond's worth).
+  Nothing here waits for the device.
 
 ## Keeping images in step with guest memory
 
-The cache is keyed on the six fetch dwords. A title that rewrites a texture in
+A fetch constant always names the same image. A title that rewrites a texture in
 place (MW2 rewrites its model-lighting table, a `512x256x4 8_8_8_8` volume in
 which each model owns a 4x4 patch) leaves the fetch constant unchanged, so the
 bytes themselves must be watched.

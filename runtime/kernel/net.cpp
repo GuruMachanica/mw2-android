@@ -284,6 +284,12 @@ PPC_FUNC(__imp__NetDll_WSAGetLastError) { ctx.r3.u64 = t_lastError; }
 // untouched makes it report the nonsense it found there and restart itself.
 PPC_FUNC(__imp__NetDll_WSAStartup)
 {
+#ifdef _WIN32
+    // The host's Winsock too: without an online service the sockets below are
+    // real ones, and every call fails until it is started.
+    static const bool started = [] { WSADATA wsa; return WSAStartup(MAKEWORD(2, 2), &wsa) == 0; }();
+    if (!started) { ctx.r3.u64 = X_WSAENETDOWN; return; }
+#endif
     uint16_t requested = uint16_t(ctx.r4.u32);
     if (auto* data = GuestPtr<uint8_t>(ctx.r5.u32))
     {
@@ -464,7 +470,18 @@ PPC_FUNC(__imp__NetDll_bind)
     { t_lastError = 10022; ctx.r3.u64 = uint32_t(-1); return; }
 
     if (!online::Get() && ::bind(s, reinterpret_cast<sockaddr*>(&addr), sizeof addr) != 0)
-    { t_lastError = LastHostError(); ctx.r3.u64 = uint32_t(-1); return; }
+    {
+        t_lastError = LastHostError();
+        // Another copy on this machine has the port, which no console ever
+        // finds: the title takes a failed bind for a fatal error and starts
+        // itself again, into the same failure. The socket stays unbound
+        // instead, and this copy plays without a network: it hears nothing
+        // sent to the port. Two copies on one machine need an online service
+        // (lan), which gives each its own.
+        if (t_lastError != 10048) { ctx.r3.u64 = uint32_t(-1); return; }
+        LOGW("net: port %u is taken by another copy of the game on this machine; this copy has no network",
+             unsigned(ntohs(UnshiftPort(addr.sin_port))));
+    }
     {
         std::lock_guard g(g_socketLock);
         g_sockets[ctx.r4.u32].port = ntohs(UnshiftPort(addr.sin_port));

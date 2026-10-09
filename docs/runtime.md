@@ -80,19 +80,28 @@ physical heap, since everything the GPU is handed comes from there.
 
 `main.cpp` gets the image one of two ways (`runtime/install/`):
 
-- **A player's start** (no arguments, or `--install <iso or folder>`): the
-  executable works from its own folder. If `game/<xex>` is missing it asks for
-  the disc image in the desktop's file dialog (or takes the one given to
-  `--install`) and copies the fastfiles (`.ff`), the image archives (`.pak`) and
-  both executables into `game/`, executables last, so an executable present
-  means a finished install. It then reads `game/default.xex` or
-  `game/default_mp.xex`, refuses it unless its SHA-256 matches the one CMake
-  baked in from `mw2/` (another region or a title update has other code at
-  other addresses), and decrypts and decompresses the XEX2 in memory at every
-  launch (`install/xex.cpp`, `install/crypto.cpp`).
+- **A player's start** (no arguments): the executable works from its own
+  folder. It reads `game/default.xex` or `game/default_mp.xex` and takes it
+  only if its SHA-256 is the one CMake baked in from `mw2/` (another region or
+  another version has other code at other addresses), then decrypts and
+  decompresses the XEX2 in memory, where it has either (`install/xex.cpp`,
+  `install/crypto.cpp`). With no such executable there -- nothing installed,
+  or an install of another version -- it starts `mw2-launcher` beside it and
+  ends; installing is the launcher's ([building.md](building.md#the-launcher)).
 - **A development run** names the image and the game folder:
-  `./build/mw2 mw2/default.pe mw2/game`. The image may be the flat PE that
-  `tools/xexdump.py` writes or the XEX itself, decrypted on the way in.
+  `./build/mw2 mw2/default.pe mw2/game`. The image is the flat PE that
+  `tools/xexdump.py` writes; the disc version also takes the disc's XEX
+  itself, decrypted on the way in.
+
+The campaign and the multiplayer are two executables, and the title's menus
+go from one to the other with `XamLoaderLaunchTitle`, after leaving what the
+other should know with `XamLoaderSetLaunchData` (1000 bytes it reads back at
+its own start). Here they are two programs: the call ends the run, and once
+the window and the sound are let go it starts `mw2-sp` or `mw2-mp` beside the
+running one, with the launch data in the `MW2_LAUNCH_DATA` environment
+variable (`kernel/misc.cpp`, `install/install.cpp`). A development run only
+logs the request, since nothing tells it where the other build and its image
+are.
 
 The image is copied to `PPC_IMAGE_BASE`, and every recompiled function from
 `PPCFuncMappings` is written into the function table, so an indirect call
@@ -191,6 +200,22 @@ and red zone, with the caller's r13. It restores MXCSR afterwards: the console
 keeps the scalar and vector float modes in separate registers, x86 has one,
 and the recompiled code tracks which mode it last set, so a callee that leaves
 flush-to-zero on would make the caller's scalar code flush from then on.
+
+### setjmp and longjmp
+
+`Com_Error` leaves an error with the CRT's `longjmp` to the `setjmp` in the
+thread's frame loop (the main loop, the renderer, the workers each have one).
+Both recompiler configs name the pair (`setjmp_address`, `longjmp_address`), so
+the recompiler emits host `setjmp`/`longjmp` there, saving the guest registers
+at the `setjmp` and restoring them when the `longjmp` lands. Recompiled as
+ordinary functions, the `longjmp` would return into the code that raised the
+error, which carries on in a state the title never expects: a client dropped at
+the end of a match hung in its error cleanup.
+
+A host `longjmp` skips every host frame between the two, destructors included.
+Runtime code that calls back into guest code -- a hook's `GUEST_ORIG`, an APC,
+the scripted console -- must not hold a lock or an owning object across the
+call.
 
 ## Threads
 

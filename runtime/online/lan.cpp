@@ -436,4 +436,4 @@ namespace
     };
 }
 
-std::unique_ptr<online::Service> online::Create() { return std::make_unique<Lan>(); }
+std::unique_ptr<online::Service> online::MakeLan() { return std::make_unique<Lan>(); }

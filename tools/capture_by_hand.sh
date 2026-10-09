@@ -33,7 +33,6 @@ if [ ! -x "$RD/bin/renderdoccmd" ]; then
 fi
 
 mkdir -p "$OUT"
-export MW2_WINDOW=1
 export MW2_CONSOLE="1:map $MAP"
 export MW2_RENDERDOC_OUT="$OUT/by_hand"
 export LD_LIBRARY_PATH="$RD/lib${LD_LIBRARY_PATH:+:$LD_LIBRARY_PATH}"

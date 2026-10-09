@@ -14,31 +14,42 @@ files are included; you need your own disc.
 - Private matches and system link, online with friends:
   - **Steam** build: invite friends through Steam, no port to open
   - **LAN** build: for players without Steam, on the same network
-- 60 fps, native MSAA, any window size or fullscreen
+- 60 fps, native MSAA, any window size or fullscreen, drawn at 720p, 1440p or 4K
 - Xbox 360-style controller, with rumble
 
 Not supported: public matchmaking and ranked playlists (they needed
-Activision's servers), cutscene and loading movies. Special Ops is untested.
+Activision's servers). Special Ops is untested.
 
 ## Requirements
 
-- An ISO of the Xbox 360 disc, version 1.0.557 (as on the main menu; title
-  updates can't be used). The installer checks it.
-- Linux or Windows, 64-bit; or Android 10 and later on a 64-bit phone (arm64-v8a)
-  ([docs/android.md](docs/android.md))
-- A Vulkan 1.3 GPU (MediaTek Dimensity / Mali, Google Tensor, Samsung Exynos / Xclipse, or Qualcomm Snapdragon / Adreno)
-- 6 GB of free storage space
-- A controller (the keyboard only covers the menus; Android has a fully customizable on-screen touch pad)
+- An ISO of the Xbox 360 disc, version 1.0.557 (USA/Europe). The launcher checks it and installs required files.
+- Linux or Windows, 64-bit; or Android 10 and later on a 64-bit phone (arm64-v8a) ([docs/android.md](docs/android.md))
+- A Vulkan 1.2+ GPU (PC) / Vulkan 1.3 GPU (Android: MediaTek Dimensity/Mali, Google Tensor, Samsung Exynos/Xclipse, Qualcomm Snapdragon/Adreno)
+- 6-8 GB of free storage space
+- A controller (the keyboard covers the menus; Android has a fully customizable on-screen touch pad)
 
 ## Install
 
 1. Download `steam` or `lan` for your system from the
    [releases](../../releases/latest), and extract it anywhere.
-2. Start `mw2-sp` (campaign) or `mw2-mp` (multiplayer). The first time, it
-   asks for your ISO and copies the game files into `game/` beside it.
+2. Start `mw2-launcher` and choose INSTALL GAME. It asks for your ISO, copies
+   the game files into `game/` beside it and applies title update 6.
+3. PLAY CAMPAIGN and PLAY MULTIPLAYER start the game; so do `mw2-sp` and
+   `mw2-mp` directly.
 
-From a terminal: `./mw2-mp --install path/to/game.iso` (an extracted disc
-folder works too).
+From a terminal: `./mw2-launcher --install path/to/game.iso` (an extracted
+disc folder works too). If the update can't be downloaded, the launcher says
+where to get it and takes the file (`--update <file>`).
+
+The launcher also has PROFILE (set the multiplayer rank and prestige, unlock
+everything, open the campaign's and Special Ops' missions), RESOLUTION (the
+size the game draws at: 720p as on the console, 1440p or 4K, which need a
+faster graphics card) and CHECK FOR UPDATES, which installs a newer release
+over this one.
+
+Something wrong? REPORT A BUG runs the game once with its log kept, then
+writes a report file and opens a new issue with your system's description
+filled in. Describe what happened, drag the file in, and submit.
 
 Saves go in `saves/` beside the executables.
 
@@ -66,7 +77,8 @@ Building it means generating the recompiled sources on desktop and building via 
 
 **Online.** Everyone runs `mw2-mp` from the same build.
 
-- **Steam**: Steam must be running; the game shows as *Spacewar*. Host a
+- **Steam**: with Steam running, the game shows as *Spacewar*. Without it, the
+  `steam` download plays as the `lan` one does, with a rank of its own. Host a
   PLAY ONLINE → PRIVATE MATCH, invite from Steam's friend list (or `F6` if you
   added `mw2-mp` to Steam as a non-Steam game). The friend accepts while their
   game is running.
@@ -74,8 +86,18 @@ Building it means generating the recompiled sources on desktop and building via 
   matches, the lobby's "Invite friends" invites everyone on the network; start
   the others with `MW2_LAN_ACCEPT=1`. Your name is your login, or `MW2_NAME=`.
 
-**Settings** (environment variables): `MW2_FULLSCREEN=1`, `MW2_MSAA=<n>` or
-`MW2_NO_MSAA=1`, `MW2_NO_AUDIO=1`.
+**More players.** The first controller is you. A second, third or fourth
+controller signs in on the game's sign-in screen, which opens where the game
+asks for it (SIGN IN PROFILE in split screen, SYSTEM LINK) or with the Guide
+button (or Back and Start together): choose a profile, which keeps its own
+rank and settings, or make a new one. The launcher's PROFILE screen renames
+them. Two copies of `mw2-mp` on one PC can play a SYSTEM LINK match, each with
+the controller that chose SYSTEM LINK in it.
+
+**Settings**: `MW2_FULLSCREEN=1`, `MW2_SCALE=<2 or 3>` (what RESOLUTION
+sets), `MW2_MSAA=<n>` or `MW2_NO_MSAA=1`, `MW2_NO_AUDIO=1`. Set them as
+environment variables, or keep them in a file named `.env` beside the
+executables, one per line.
 
 **Bug reports**: run with `MW2_LOG_FILE=mw2.log` and attach the file.
 

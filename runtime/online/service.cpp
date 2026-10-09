@@ -3,16 +3,43 @@
 #include "../console.h"
 #include "../kernel/kernel.h"
 
+namespace
+{
+    // The backends this build has, in the order they are tried (MW2_ONLINE).
+    struct Backend
+    {
+        const char* name;
+        std::unique_ptr<online::Service> (*make)();
+    };
+    constexpr Backend kBackends[] = {
+#ifdef MW2_ONLINE_STEAM
+        { "steam", online::MakeSteam },
+#endif
+#ifdef MW2_ONLINE_LAN
+        { "lan", online::MakeLan },
+#endif
+        { nullptr, nullptr },
+    };
+}
+
 online::Service* online::Get()
 {
     static Service* const service = [] {
-        static std::unique_ptr<Service> made = Create();
-        if (made && !made->Start())
+        static std::unique_ptr<Service> made;
+        for (const Backend& backend : kBackends)
         {
-            LOGW("online: the service did not start; the title stays offline");
+            if (!backend.make) break;
+            made = backend.make();
+            if (made->Start())
+            {
+                LOGI("online: the service is %s", backend.name);
+                return made.get();
+            }
             made.reset();
+            LOGW("online: %s did not start", backend.name);
         }
-        return made.get();
+        if (kBackends[0].make) LOGW("online: no service started; the title stays offline");
+        return static_cast<Service*>(nullptr);
     }();
     return service;
 }

@@ -71,8 +71,13 @@ namespace vk::renderer::detail
 
     // Slots neither shader names are left empty: the layout declares all
     // thirty-two, but a shader cannot read what it did not declare.
-    VkDescriptorSet TextureSetFor(const gpu::RegisterFile& r, uint32_t mask, const uint8_t* kinds)
+    //
+    // `scaled` gets a bit for each slot bound to a resolve's copy, whose image
+    // is State::scale times the size the title gave it.
+    VkDescriptorSet TextureSetFor(const gpu::RegisterFile& r, uint32_t mask, const uint8_t* kinds,
+                                  uint32_t& scaled)
     {
+        scaled = 0;
         Stopwatch watch(g.textureNanoseconds);
         uint64_t ids[vk::textures::kSlots]{};
         for (uint32_t slot = 0; slot < vk::textures::kSlots; slot++)
@@ -102,6 +107,7 @@ namespace vk::renderer::detail
                     key, linearise ? newest->gammaView : newest->view, fetch);
                 if (ids[slot])
                 {
+                    scaled |= 1u << slot;
                     if (g.drawRecord) NoteDrawTexture(slot, fetch, ids[slot], true);
                     continue;
                 }
@@ -128,6 +134,7 @@ namespace vk::renderer::detail
             kNdc = 1, kPipeline = 2, kViewport = 4, kScissor = 8, kDepthBias = 16,
             kStencil = 32, kConstants = 64, kTextures = 128, kAlphaTest = 256,
             kIndexBuffer = 512, kIndexed = 1024, kFaces = 2048, kDepthTests = 4096,
+            kScaled = 8192,
         };
         uint32_t set = 0;
         VkPipelineLayout layout = VK_NULL_HANDLE;
@@ -138,6 +145,7 @@ namespace vk::renderer::detail
         float depthBias[2]{};
         uint32_t stencil[2]{};
         uint32_t push[4]{};
+        uint32_t scaled = 0;
         VkCullModeFlags cullMode = 0;
         VkFrontFace frontFace = VK_FRONT_FACE_COUNTER_CLOCKWISE;
         DepthTests depthTests{};
@@ -149,9 +157,16 @@ namespace vk::renderer::detail
 
         void operator()(VkCommandBuffer command) const
         {
+            // The pixel stage's range runs over these bytes on its way to the
+            // scaled slots, so a write of them names both stages.
+            constexpr VkShaderStageFlags kBoth = VK_SHADER_STAGE_VERTEX_BIT |
+                                                 VK_SHADER_STAGE_FRAGMENT_BIT;
             if (set & kNdc)
-                vkCmdPushConstants(command, layout, VK_SHADER_STAGE_VERTEX_BIT,
+                vkCmdPushConstants(command, layout, kBoth,
                                    bindings::kVertexPushOffset, sizeof ndc, ndc);
+            if (set & kScaled)
+                vkCmdPushConstants(command, layout, kBoth,
+                                   bindings::kScaledPushOffset, sizeof scaled, &scaled);
             if (set & kPipeline)
                 vkCmdBindPipeline(command, VK_PIPELINE_BIND_POINT_GRAPHICS, pipeline);
             if (set & kViewport) vkCmdSetViewport(command, 0, 1, &viewport);
@@ -488,8 +503,9 @@ void vk::renderer::Draw(const gpu::RegisterFile& r, const DrawCall& call)
         kinds[s] = (pixel->translation.textureMask & (1u << s))
                        ? pixel->translation.textureKinds[s]
                        : vertex->translation.textureKinds[s];
+    uint32_t scaledSlots = 0;
     VkDescriptorSet textureSet = TextureSetFor(
-        r, vertex->translation.textureMask | pixel->translation.textureMask, kinds);
+        r, vertex->translation.textureMask | pixel->translation.textureMask, kinds, scaledSlots);
     if (!textureSet) { Skip("no texture descriptor set"); return; }
 
     VkViewport viewport{};
@@ -552,6 +568,21 @@ void vk::renderer::Draw(const gpu::RegisterFile& r, const DrawCall& call)
         bound.pipeline = built;
     }
 
+    // The title's pixels up to here, the images' from here.
+    viewport.x *= float(g.scale);
+    viewport.y *= float(g.scale);
+    viewport.width *= float(g.scale);
+    viewport.height *= float(g.scale);
+    scissor = { Scaled(scissor.offset), Scaled(scissor.extent) };
+
+    if (g.scale > 1 && (!bound.scaledValid || bound.scaled != scaledSlots))
+    {
+        op.set |= DrawOp::kScaled;
+        op.scaled = scaledSlots;
+        bound.scaled = scaledSlots;
+        bound.scaledValid = true;
+    }
+
     if (!bound.viewportValid || std::memcmp(&bound.viewport, &viewport, sizeof viewport))
     {
         op.set |= DrawOp::kViewport;
@@ -607,7 +638,9 @@ void vk::renderer::Draw(const gpu::RegisterFile& r, const DrawCall& call)
         }
         const float bias[2] = {
             offset * (depthInfo.Format() ? float(1u << 24) : float((1u << 24) - 1)),
-            scale * (1.0f / 16.0f),
+            // A slope is depth per pixel, and the images' pixels are smaller
+            // than the title's.
+            scale * (1.0f / 16.0f) * float(g.scale),
         };
         if (!bound.depthBiasValid || std::memcmp(bound.depthBias, bias, sizeof bias))
         {

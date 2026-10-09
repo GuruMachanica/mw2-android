@@ -174,9 +174,12 @@ destination address, and a texture fetch of that address binds the image.
   map is one 1024x2048 surface filled by two resolves.
 - Colour is blitted and also gets an sRGB view. Depth is copied and sampled
   through a depth-only view; the title reads scene depth as a texture.
-- **The frame** is a colour resolve of exactly 1280x720. It is blitted into one
-  of four present images, run through the display colour table, and submitted.
-  A resolve of any other size is never shown.
+- **The frame** is the front buffer the swap packet names (`PM4_XE_SWAP`, which
+  `VdSwap` writes): a resolve destination like any other. At the swap its
+  newest copy is blitted into one of four present images, run through the
+  display colour table, and submitted. A resolve is never shown for having the
+  display's size: the title also keeps the screen in a 1280x720 texture, before
+  the interface is drawn, for the next frame's blur.
 
 A resolve does not end the submission unless the slot's arena share is half used.
 
@@ -196,6 +199,36 @@ A resolve does not end the submission unless the slot's arena share is half used
   a whole sweep is a curve, so the table is published under a lock at entry 255,
   and frames are shown untouched until then. `display_table.cpp` applies it as
   a compute pass on the present image.
+
+## Resolution scale
+
+`MW2_SCALE=2` or `3`, read once at start-up, makes every EDRAM surface, every
+resolve copy and the present images that many times wider and taller. The
+title is not told. A `Target`'s and a `Resolved`'s sizes, the keys, and every
+rectangle worked out from the registers stay in the title's pixels, and are
+multiplied where they are handed to Vulkan: image extents, render areas,
+viewport and scissor, and the regions of resolves, copies and blits. So the
+frame is still "a colour resolve of 1280x720". The scale is lowered until
+4096 of the title's pixels fit one of the device's images.
+
+The scale is a whole number, so the title's scissors and resolve rectangles
+land on pixel boundaries, and it applies to every surface, since the passes
+read each other's at matching sizes. Three things are not a plain
+multiplication:
+
+- **Fetches of a resolve's copy.** The translated shader takes a texture's
+  size from the bound image, for half-texel offsets and unnormalised
+  coordinates, and a copy is larger than the surface the title means. Each
+  draw pushes a bit per slot bound to a copy, and a shader built under a scale
+  divides those slots' sizes by it. A shader built without one has no such
+  code ([shaders.md](shaders.md)).
+- **Occlusion counts** are divided by the scale squared: the title compares
+  them with numbers of its own pixels.
+- **Depth bias.** The slope term is multiplied by the scale, as Xenia does: a
+  slope is depth per pixel, and the pixels are smaller.
+
+The launcher's RESOLUTION entry keeps the scale in `.env` as
+`MW2_SCALE=<n>` ([switches.md](switches.md#the-settings-file)).
 
 ## Multisampling
 
@@ -250,7 +283,7 @@ parsed on the consumer, so the title's frame retires at parse time.
 
 ## Presenting
 
-The frame resolve waits (`vk::WaitUntilTaken`) until the window has copied out
+The swap waits (`vk::WaitUntilTaken`) until the window has copied out
 the present image it is about to reuse. With four present images, the renderer
 can run three frames ahead. The window presents every frame once, in order,
 one per blank (`FIFO`). Frames the window has not taken within 250 ms are

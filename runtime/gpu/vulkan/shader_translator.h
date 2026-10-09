@@ -56,7 +56,9 @@ namespace shader
     };
 
     // `words` is the program in host byte order, `count` its length in dwords.
-    Translation Translate(Type type, const uint32_t* words, size_t count);
+    // `scale` is how many times wider and taller than the title's the render
+    // targets are; past 1 the shader takes bindings::kScaledPushOffset.
+    Translation Translate(Type type, const uint32_t* words, size_t count, uint32_t scale = 1);
 
     std::string Describe(const Translation& result);
 }

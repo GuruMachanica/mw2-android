@@ -1,10 +1,12 @@
 # Builds the player's release and drafts a GitHub Release with it. Run by hand
 # from the Actions tab.
 #
-# The recompiled code is made from the disc's two executables, which are not in
-# this repository. They come from a private one, as Unleashed Recompiled does
-# it: the secret ASSET_REPO names it (owner/name), ASSET_REPO_TOKEN is a token
-# that can read it, and it holds default.xex and default_mp.xex at its root.
+# The recompiled code is made from the disc's two executables and, for title
+# update 6, the update's patches to them, none of which are in this repository.
+# They come from a private one, as Unleashed Recompiled does it: the secret
+# ASSET_REPO names it (owner/name), ASSET_REPO_TOKEN is a token that can read
+# it, and it holds default.xex and default_mp.xex at its root and the update's
+# files (two .xexp, three .ff) under title-updates/TU6/.
 name: release
 
 on:
@@ -13,6 +15,11 @@ on:
       version:
         description: "Release tag, e.g. v0.1.0"
         required: true
+      game_version:
+        description: "The game's version: tu6 (title update 6) or tu0 (the disc's)"
+        type: choice
+        options: [tu6, tu0]
+        default: tu6
 
 permissions:
   contents: write
@@ -28,10 +35,10 @@ jobs:
       CCACHE_MAXSIZE: 6G
       CCACHE_COMPILERCHECK: content
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v6
 
       - name: Check out the game's executables
-        uses: actions/checkout@v4
+        uses: actions/checkout@v6
         with:
           repository: ${{ secrets.ASSET_REPO }}
           token: ${{ secrets.ASSET_REPO_TOKEN }}
@@ -39,8 +46,9 @@ jobs:
 
       - name: Place them
         run: |
-          mkdir -p mw2
-          cp private/default.xex private/default_mp.xex mw2/
+          mkdir -p mw2/tu0 mw2/update
+          cp private/default.xex private/default_mp.xex mw2/tu0/
+          cp private/title-updates/TU6/*.xexp private/title-updates/TU6/*.ff mw2/update/
           rm -rf private
 
       - name: Install the toolchain and libraries
@@ -67,7 +75,7 @@ jobs:
           rm -rf Vulkan-Headers llvm.sh
 
       - name: Restore the compiler cache
-        uses: actions/cache@v4
+        uses: actions/cache@v5
         with:
           path: .ccache
           key: ccache-linux-${{ github.sha }}
@@ -79,7 +87,7 @@ jobs:
           for title in sp mp; do
             regenerate=1
             for online in steam lan; do
-              TITLE=$title RELEASE=1 ONLINE=$online BUILD_DIR=out/$title-$online REGENERATE=$regenerate ./build.sh
+              VERSION=${{ inputs.game_version }} TITLE=$title RELEASE=1 RELEASE_TAG=${{ inputs.version }} ONLINE=$online BUILD_DIR=out/$title-$online REGENERATE=$regenerate ./build.sh
               regenerate=0
             done
           done
@@ -93,14 +101,16 @@ jobs:
             mkdir -p $name
             cp out/sp-$online/mw2 $name/mw2-sp
             cp out/mp-$online/mw2 $name/mw2-mp
-            strip $name/mw2-sp $name/mw2-mp
+            cp out/sp-$online/mw2-launcher $name/mw2-launcher
+            strip $name/mw2-sp $name/mw2-mp $name/mw2-launcher
             cp README.md LICENSE $name/
+            cp third_party/fonts/OFL.txt $name/FONT-LICENSE.txt
             tar czf dist/$name.tar.gz $name
           done
           echo "glibc needed: $(objdump -T out/mp-steam/mw2 | grep -oE 'GLIBC_[0-9.]+' | sort -Vu | tail -1)"
           ls -la dist
 
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@v6
         with:
           name: linux
           path: dist/*
@@ -117,10 +127,10 @@ jobs:
       CCACHE_COMPILERCHECK: content
       LLVM_MINGW_RELEASE: "20260922"
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v6
 
       - name: Check out the game's executables
-        uses: actions/checkout@v4
+        uses: actions/checkout@v6
         with:
           repository: ${{ secrets.ASSET_REPO }}
           token: ${{ secrets.ASSET_REPO_TOKEN }}
@@ -128,8 +138,9 @@ jobs:
 
       - name: Place them
         run: |
-          mkdir -p mw2
-          cp private/default.xex private/default_mp.xex mw2/
+          mkdir -p mw2/tu0 mw2/update
+          cp private/default.xex private/default_mp.xex mw2/tu0/
+          cp private/title-updates/TU6/*.xexp private/title-updates/TU6/*.ff mw2/update/
           rm -rf private
 
       - name: Install the toolchains
@@ -143,7 +154,7 @@ jobs:
           echo "LLVM_MINGW=$HOME/$name" >> "$GITHUB_ENV"
 
       - name: Restore the compiler cache
-        uses: actions/cache@v4
+        uses: actions/cache@v5
         with:
           path: .ccache
           key: ccache-windows-${{ github.sha }}
@@ -155,7 +166,7 @@ jobs:
           for title in sp mp; do
             regenerate=1
             for online in steam lan; do
-              WINDOWS=1 TITLE=$title RELEASE=1 ONLINE=$online BUILD_DIR=out/$title-$online REGENERATE=$regenerate ./build.sh
+              WINDOWS=1 VERSION=${{ inputs.game_version }} TITLE=$title RELEASE=1 RELEASE_TAG=${{ inputs.version }} ONLINE=$online BUILD_DIR=out/$title-$online REGENERATE=$regenerate ./build.sh
               regenerate=0
             done
           done
@@ -169,13 +180,15 @@ jobs:
             mkdir -p $name
             cp out/sp-$online/mw2.exe $name/mw2-sp.exe
             cp out/mp-$online/mw2.exe $name/mw2-mp.exe
-            $LLVM_MINGW/bin/llvm-strip $name/mw2-sp.exe $name/mw2-mp.exe
+            cp out/sp-$online/mw2-launcher.exe $name/mw2-launcher.exe
+            $LLVM_MINGW/bin/llvm-strip $name/mw2-sp.exe $name/mw2-mp.exe $name/mw2-launcher.exe
             cp README.md LICENSE $name/
+            cp third_party/fonts/OFL.txt $name/FONT-LICENSE.txt
             zip -qr dist/$name.zip $name
           done
           ls -la dist
 
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@v6
         with:
           name: windows
           path: dist/*
@@ -184,7 +197,7 @@ jobs:
     needs: [linux, windows]
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/download-artifact@v4
+      - uses: actions/download-artifact@v7
         with:
           path: dist
           merge-multiple: true
@@ -193,10 +206,18 @@ jobs:
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
+          # The bullets are placeholders: the draft is edited before it is
+          # published, to say what the release brings.
           cat > notes.md <<'EOF'
+          This release includes:
+          - NEW:
+          - NEW:
+          - Fixed:
+          - Built on ${{ github.sha }}
+
           Needs your own copy of the game: an ISO of the Xbox 360 disc, version 1.0.557.
           Take `steam` to play online through Steam, `lan` to play on a local network.
-          Extract it anywhere and start `mw2-sp` or `mw2-mp`; the first start installs the game from your ISO.
+          Extract it anywhere and start `mw2-launcher`: it installs the game from your ISO, then starts it.
           EOF
           gh release create "${{ inputs.version }}" dist/* --repo "${{ github.repository }}" \
             --draft --title "${{ inputs.version }}" --notes-file notes.md --target "${{ github.sha }}"

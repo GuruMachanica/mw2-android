@@ -10,6 +10,13 @@
 #include <cmath>
 #include <cstdio>
 #include <string>
+#include <mutex>
+#include <thread>
+#ifndef _WIN32
+#include <csignal>
+#include <unistd.h>
+#endif
+#include "kernel/kernel.h"
 
 namespace
 {
@@ -64,6 +71,33 @@ namespace
 
     double Seconds(int64_t us) { return double(us) / 1e6; }
 
+    // A stall: play was going and no world frame has come for a second. What
+    // the time went on is not the renderer's to say, so every guest thread's
+    // wait and every thread's stack go to the log, once a stall, as
+    // `kill -USR2` gives them.
+    std::atomic<int64_t> g_lastWorldUs{ -1 };
+    std::atomic<bool> g_ending{ false };
+    void WatchForStalls()
+    {
+#ifndef _WIN32
+        int64_t reported = -1;
+        while (!g_ending.load(std::memory_order_relaxed))
+        {
+            usleep(100000);
+            const int64_t last = g_lastWorldUs.load(std::memory_order_relaxed);
+            if (g_ending.load(std::memory_order_relaxed) ||
+                !g_inPlay.load(std::memory_order_relaxed) || last == reported ||
+                pacing::Microseconds() - last < kPauseUs)
+                continue;
+            reported = last;
+            LOGW("STALL: no world frame since %.3f s; what every thread is doing follows",
+                 Seconds(last));
+            kernel::ReportWaits();
+            std::raise(SIGUSR2);
+        }
+#endif
+    }
+
     uint32_t LengthBucket(uint64_t lost)
     {
         if (lost <= 3) return uint32_t(lost - 1);
@@ -109,13 +143,19 @@ void stutters::Finished(uint64_t serial, bool world)
     }
     const auto remember = [&] {
         r.lastWorldUs = now;
+        g_lastWorldUs.store(now, std::memory_order_relaxed);
         std::copy(std::begin(costs), std::end(costs), r.costsAt);
         std::copy(std::begin(times), std::end(times), r.timesAt);
     };
 
     if (gap >= kPauseUs)
     {
-        if (r.streak >= kPlayStreak) r.pauses++;
+        if (r.streak >= kPlayStreak)
+        {
+            r.pauses++;
+            LOGW("STALL: over at %.3f s, %.1f s after the last world frame", Seconds(now),
+                 Seconds(gap));
+        }
         r.streak = 0;
         g_inPlay.store(false, std::memory_order_relaxed);
     }
@@ -125,6 +165,8 @@ void stutters::Finished(uint64_t serial, bool world)
         {
             g_inPlay.store(true, std::memory_order_relaxed);
             LOGI("stutters: in play at %.3f s, watching", Seconds(now));
+            static std::once_flag watching;
+            std::call_once(watching, [] { std::thread(WatchForStalls).detach(); });
         }
         remember();
         return;
@@ -204,6 +246,8 @@ void stutters::Mark(const char* how)
         LOGW("STUTTER MARK %u (%s) at %.3f s: the last stutter was %.0f ms before", n, how,
              Seconds(now), double(now - last) / 1000.0);
 }
+
+void stutters::Ending() { g_ending.store(true, std::memory_order_relaxed); }
 
 void stutters::Report()
 {

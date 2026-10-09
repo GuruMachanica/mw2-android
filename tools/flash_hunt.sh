@@ -65,7 +65,7 @@ echo "F8 = fullscreen.   Close the window to finish."
 [ -n "$noshadow" ] && echo "no shadow of guest memory (--no-shadow)"
 echo
 
-env MW2_WINDOW=1 MW2_NET_LINK=1 MW2_CONSOLE="3:map $map" \
+env MW2_NET_LINK=1 MW2_CONSOLE="3:map $map" \
     MW2_LOG_TIME=1 MW2_FLASH_HUNT=1 \
     MW2_FLASH_FRAMES="$frames" MW2_FLASH_DIR="$out" \
     ${magenta:+MW2_MARK_EMPTY=1} \

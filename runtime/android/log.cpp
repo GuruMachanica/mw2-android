@@ -28,8 +28,27 @@ namespace
 
     std::mutex g_lock;
     std::FILE* g_file = nullptr;
+    std::FILE* g_fileExt = nullptr;
     std::deque<std::string> g_tail;
     std::string g_status;
+
+    std::FILE* OpenSingleLog(const char* path)
+    {
+        if (!path || !*path) return nullptr;
+        if (std::FILE* existing = std::fopen(path, "rb"))
+        {
+            std::fseek(existing, 0, SEEK_END);
+            const long size = std::ftell(existing);
+            std::fclose(existing);
+            if (size > 4 * 1024 * 1024) std::remove(path);
+        }
+        std::FILE* f = std::fopen(path, "a");
+        if (!f) return nullptr;
+        std::setvbuf(f, nullptr, _IOLBF, 0);
+        std::fprintf(f, "\n===== new run, pid %d =====\n", int(getpid()));
+        std::fflush(f);
+        return f;
+    }
 }
 
 void android::OpenLogFile(const char* path)
@@ -37,25 +56,20 @@ void android::OpenLogFile(const char* path)
     if (!path || !*path) return;
     std::lock_guard lock(g_lock);
     if (g_file) { std::fclose(g_file); g_file = nullptr; }
+    if (g_fileExt) { std::fclose(g_fileExt); g_fileExt = nullptr; }
 
-    // Appended, not truncated. The launcher and the run are two processes
-    // (":game" in the manifest) and each opens a log of its own -- but even
-    // one process starting twice used to wipe the evidence of why it ended
-    // the first time, which is the one thing the file exists for. Trimmed
-    // when it grows past a few megabytes, so it cannot fill the phone.
-    if (std::FILE* existing = std::fopen(path, "rb"))
+    g_file = OpenSingleLog(path);
+
+    const auto& ext = android::GetPaths().external;
+    if (!ext.empty())
     {
-        std::fseek(existing, 0, SEEK_END);
-        const long size = std::ftell(existing);
-        std::fclose(existing);
-        if (size > 4 * 1024 * 1024) std::remove(path);
+        const char* slash = std::strrchr(path, '/');
+        const std::string extPath = ext + "/" + (slash ? slash + 1 : "game.log");
+        if (extPath != path)
+        {
+            g_fileExt = OpenSingleLog(extPath.c_str());
+        }
     }
-
-    g_file = std::fopen(path, "a");
-    if (!g_file) return;
-    std::setvbuf(g_file, nullptr, _IOLBF, 0);
-    std::fprintf(g_file, "\n===== new run, pid %d =====\n", int(getpid()));
-    std::fflush(g_file);
 }
 
 // ---- whatever the runtime prints rather than logs -------------------------
@@ -130,6 +144,11 @@ void android::LogLine(char level, const char* text)
     {
         std::fputs(text, g_file);
         std::fputc('\n', g_file);
+    }
+    if (g_fileExt)
+    {
+        std::fputs(text, g_fileExt);
+        std::fputc('\n', g_fileExt);
     }
     // Warnings and errors are what a player is asked for; the rest of the
     // tail is context around them.

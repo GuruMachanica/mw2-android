@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Decrypt + decompress (basic) an XEX2 into its raw PE image, and dump PE sections."""
+"""Decrypt + decompress (basic, or none) an XEX2 into its raw PE image, and dump PE sections."""
 import struct, sys, subprocess, os, shutil
 
 OPENSSL = shutil.which("openssl") or (r"C:\Program Files\Git\usr\bin\openssl.exe" if os.path.exists(r"C:\Program Files\Git\usr\bin\openssl.exe") else "openssl")
@@ -30,6 +30,8 @@ def load(path):
         pad = (-len(src)) % 16
         src = aes_cbc_dec(session.hex(), src + bytes(pad))[:len(src)+pad]
         print(f"# session key = {session.hex()}", file=sys.stderr)
+    if comp == 0:       # stored as it is: what applying a title update writes
+        return bytes(src), hdrs, d
     assert comp == 1, f"unsupported compression {comp}"
     n = (ffsize - 8)//8
     out = bytearray(); p = 0

@@ -8,10 +8,11 @@
 // peer is a 64-bit id the backend chooses (an address, a SteamID, an account
 // number); the kernel never looks inside it.
 //
-// The backend is chosen when the runtime is built (MW2_ONLINE in CMakeLists,
-// ONLINE= for build.sh): one file under runtime/online/ defines Create(), and a
-// new service is one more such file. "none" builds none, and the title keeps its
-// offline system link on this machine.
+// The backends are chosen when the runtime is built (MW2_ONLINE in CMakeLists,
+// ONLINE= for build.sh), in the order they are tried: the first that starts is
+// the service. A backend is one file under runtime/online/ with a function that
+// makes it, listed in service.cpp; a new service is one more such file. "none"
+// builds none, and the title keeps its offline system link on this machine.
 #include <cstddef>
 #include <cstdint>
 #include <memory>
@@ -92,11 +93,12 @@ namespace online
         virtual bool NextInvite(Invite& out) { (void)out; return false; }
     };
 
-    // Defined once per backend; null for "none".
-    std::unique_ptr<Service> Create();
+    // One per backend, in its file.
+    std::unique_ptr<Service> MakeSteam();
+    std::unique_ptr<Service> MakeLan();
 
-    // The service, started on first use; null when there is none or it could
-    // not start.
+    // The service, started on first use: the first backend built in that
+    // starts. Null when there is none or none could start.
     Service* Get();
 
     // Once a frame on the title's main thread: types an accepted invitation's

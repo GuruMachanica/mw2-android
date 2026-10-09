@@ -194,6 +194,10 @@ PPC_FUNC(__imp__XamContentCreateEx)
              package.string().c_str(), device, type,
              !existed ? "new" : clear ? "emptied" : "existing");
     }
+    // Asked to open a package nobody has saved yet: the first look for a new
+    // player's stats, or for a save before the first.
+    else if (result == X_ERROR_PATH_NOT_FOUND && !existed)
+        LOGK("content: there is no %s yet (%s: asked to open it)", package.string().c_str(), drive.c_str());
     else
     {
         LOGK("content: refused %s: on %s -- error %u", drive.c_str(),

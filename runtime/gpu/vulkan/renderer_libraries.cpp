@@ -282,7 +282,7 @@ namespace vk::renderer::detail
         Shader entry;
         entry.type = type;
         entry.code.assign(code, code + words);
-        entry.translation = shader::Translate(type, code, words);
+        entry.translation = shader::Translate(type, code, words, g.scale);
         if (!entry.translation.ok) return entry;
         VkShaderModuleCreateInfo info{ VK_STRUCTURE_TYPE_SHADER_MODULE_CREATE_INFO };
         info.codeSize = entry.translation.spirv.size() * 4;

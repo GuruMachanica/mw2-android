@@ -20,6 +20,10 @@ hooks.
 | generated C++ | `ppc/` | `ppc_mp/` |
 | build directory | `build/` (`build-release/`) | `build-mp/` (`build-mp-release/`) |
 
+Both are the executables title update 6 makes of the disc's; the disc's own
+are a build option with names of their own
+([building.md](building.md#the-disc-version)).
+
 `build.sh` takes `TITLE=sp` (the default) or `TITLE=mp`. CMake takes
 `-DMW2_TITLE=sp|mp`, which selects the recompiled tree and, for `mp`, defines
 `MW2_TITLE_MP`. The Python tools make the same choice through the `MW2_TITLE`
@@ -27,8 +31,8 @@ environment variable (`tools/title.py`), which reads the PE section table from
 the image because the two executables lay their sections out differently.
 
 `config/MW2MP.toml` has its own `[main]` block: the multiplayer's addresses of
-the register save/restore helpers, and its own list of jump-table functions
-(`tools/fixbounds.py`).
+the register save/restore helpers and of `setjmp`/`longjmp`, and its own list
+of jump-table functions (`tools/fixbounds.py`).
 
 ### `runtime/title.h`
 
@@ -70,9 +74,9 @@ A unique match of a different size needs reading before it is trusted.
 
 **Every fastfile.** The campaign loads the level it is told to; the multiplayer
 chooses its own map and zones. A zone whose file is missing makes the title
-report a dirty disc and fail, so `build.sh` and the installer extract every
-`.ff` and `.pak` on the disc (about 5.7 GB). Bink movies are left out; see
-[gameplay.md](gameplay.md).
+report a dirty disc and fail, so `build.sh` and the launcher extract every
+`.ff` and `.pak` on the disc (about 5.9 GB), and the campaign's Bink movies
+beside them ([gameplay.md](gameplay.md#movies)); the multiplayer plays none.
 
 **A network link.** The multiplayer refuses to start any match without one, and
 a system-link match is how it reaches a map. `XNetGetEthernetLinkStatus`
@@ -119,11 +123,26 @@ sockets, ports -- and asks the service only for what a service does:
 
     ONLINE=none  TITLE=mp ./build.sh    # default: system link on this machine
     ONLINE=lan   TITLE=mp ./build.sh    # plain UDP between machines
-    ONLINE=steam TITLE=mp ./build.sh    # through the player's Steam client
+    ONLINE=steam TITLE=mp ./build.sh    # through the player's Steam client, or lan without it
 
-A backend is one file, `runtime/online/<name>.cpp`, defining `online::Create()`;
-`ONLINE=<name>` (CMake `MW2_ONLINE`) builds it. `none` returns no service, and
-the title's sockets are host UDP sockets, enough for system link on one machine.
+A backend is one file, `runtime/online/<name>.cpp`, with a function that makes
+it (`online::MakeLan`). `ONLINE` (CMake `MW2_ONLINE`) says which are built in,
+and `online::Get()` tries them in `service.cpp`'s order and keeps the first
+whose `Start()` succeeds: `steam` builds Steam and then lan, so a player whose
+Steam is not running plays over the local network instead, as another player
+(below). The log names the service.
+
+`none` builds no backend, and the title's sockets are host UDP sockets, enough
+for system link on one machine. Only one copy can have the title's ports then;
+a second one's binds fail, which the title takes for a fatal error and restarts
+on, so `NetDll_bind` leaves its sockets unbound and it plays without a network.
+
+The player's rank is kept under the service's account, so each service has its
+own, and a player with no service is account 1. The first time a service's
+player is seen on a machine he starts from what account 1 earned there
+(`InheritOfflineStats` in `runtime/kernel/xam.cpp`): its stats package is copied
+to his offline XUID's and, without its four leading bytes and its last, to his
+Live stats. Nothing is copied over stats he already has.
 
 With a service built in, the title's sockets are the service's and nothing is
 bound on the host, so several copies can run on one machine. A peer's 64-bit id

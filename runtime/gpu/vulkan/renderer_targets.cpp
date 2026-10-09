@@ -14,7 +14,7 @@ namespace vk::renderer::detail
         VkImageCreateInfo info{ VK_STRUCTURE_TYPE_IMAGE_CREATE_INFO };
         info.imageType = VK_IMAGE_TYPE_2D;
         info.format = target.format;
-        info.extent = { target.width, target.height, 1 };
+        info.extent = { target.width * g.scale, target.height * g.scale, 1 };
         info.mipLevels = 1;
         info.arrayLayers = 1;
         info.samples = target.samples;
@@ -240,10 +240,10 @@ namespace vk::renderer::detail
                       VK_PIPELINE_STAGE_TRANSFER_BIT, VK_PIPELINE_STAGE_TRANSFER_BIT);
         VkImageResolve region{};
         region.srcSubresource = { VK_IMAGE_ASPECT_COLOR_BIT, 0, 0, 1 };
-        region.srcOffset = { at.x, at.y, 0 };
+        region.srcOffset = Scaled(at.x, at.y, 0);
         region.dstSubresource = region.srcSubresource;
         region.dstOffset = region.srcOffset;
-        region.extent = { width, height, 1 };
+        region.extent = { width * g.scale, height * g.scale, 1 };
         const VkImage from = target.image, into = target.singleImage;
         Record([=](VkCommandBuffer command) {
             vkCmdResolveImage(command, from, VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL,
@@ -293,6 +293,7 @@ namespace vk::renderer::detail
         // the twin comes out in TRANSFER_SRC, ready to be copied from.
         const VkImageView view = target.view, twinView = target.singleView;
         const VkImage twin = target.singleImage;
+        const VkRect2D area{ Scaled(at), Scaled(VkExtent2D{ width, height }) };
         Record([=](VkCommandBuffer command) {
             constexpr VkImageAspectFlags kBoth = VK_IMAGE_ASPECT_DEPTH_BIT | VK_IMAGE_ASPECT_STENCIL_BIT;
             // The draws before it wrote the depth; the copies before it read the twin.
@@ -322,7 +323,7 @@ namespace vk::renderer::detail
             depth.loadOp = VK_ATTACHMENT_LOAD_OP_LOAD;
             depth.storeOp = VK_ATTACHMENT_STORE_OP_STORE;
             VkRenderingInfoKHR info{ VK_STRUCTURE_TYPE_RENDERING_INFO_KHR };
-            info.renderArea = { at, { width, height } };
+            info.renderArea = area;
             info.layerCount = 1;
             info.pDepthAttachment = &depth;
             info.pStencilAttachment = &depth;
@@ -397,7 +398,8 @@ namespace vk::renderer::detail
         if (!MakeImage(target, usage, aspect)) { Skip("render target allocation"); return nullptr; }
 
         LOGI("renderer: %s target %ux%u at EDRAM tile %u (%s), %ux for the title's %ux",
-             key.depth ? "depth" : "colour", target.width, target.height, key.baseTile,
+             key.depth ? "depth" : "colour", target.width * g.scale, target.height * g.scale,
+             key.baseTile,
              key.depth ? gpu::DepthTargetFormatName(guestFormat)
                        : (gpu::ColorTargetFormatName(guestFormat) ?: "unknown"),
              unsigned(target.samples), 1u << key.samples);
@@ -411,6 +413,7 @@ namespace vk::renderer::detail
     {
         EndPass();
         const VkImageView colourView = colour.view, depthView = depth.view;
+        const VkExtent2D area = Scaled(VkExtent2D{ width, height });
         Record([=](VkCommandBuffer command) {
             // What a render pass's dependency in from the outside was: a frame
             // is many passes over the same attachments, with copies and clears
@@ -436,7 +439,7 @@ namespace vk::renderer::detail
             depthAttachment.imageView = depthView;
             depthAttachment.imageLayout = VK_IMAGE_LAYOUT_DEPTH_STENCIL_ATTACHMENT_OPTIMAL;
             VkRenderingInfoKHR info{ VK_STRUCTURE_TYPE_RENDERING_INFO_KHR };
-            info.renderArea.extent = { width, height };
+            info.renderArea.extent = area;
             info.layerCount = 1;
             info.colorAttachmentCount = 1;
             info.pColorAttachments = &colourAttachment;

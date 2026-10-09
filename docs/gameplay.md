@@ -11,17 +11,29 @@ onto that one flat directory.
 
 | files | status |
 |---|---|
-| `.ff` fastfiles, `.pak` image archives | all of them are extracted, by `build.sh` from the ISO or by the installer (`runtime/install/`) |
-| `.bik` Bink movies (logos, boot movie, per-level loading movies) | left out |
+| `.ff` fastfiles, `.pak` image archives, `.bik` Bink movies | all of them are extracted, by `build.sh` from the ISO or by the launcher (`launcher/`) |
 
 Every fastfile is needed, not only the current level's: a zone whose file is
 missing makes the title report a dirty disc and fail, and the multiplayer picks
 its own zones.
 
-The Bink movies are left out because nothing decodes Bink, and a level load
-waits for a playing movie to finish; with a movie present the load never
-completes. With the files absent the title reports them missing, skips them,
-and a loading screen has a black backdrop.
+## Movies
+
+Bink is linked into the title (its own `BINK` section) and decodes on the CPU,
+on two threads of its own per movie, and its sound reaches the output with the
+rest of the title's. Nothing in the runtime is specific to it.
+
+The campaign plays `IW_logo` and `legal` at boot, and a level's briefing while
+the level loads: `video/cin_levels.txt` in `common.ff` names it, `<map>_load`.
+When the load finishes, `UI_SetActiveMenu` opens the `pregame` menu, whose item
+`press_to_skip` runs `uiScript playerstart` on A, and the level starts; it also
+starts when the briefing ends. With `ui_autoContinue` set it starts as soon as
+the load finishes, which a scripted run wants:
+
+    MW2_CONSOLE="1:set ui_autoContinue 1;2:map trainer"
+
+With a movie's file missing the title logs it, skips it, and the level starts
+when it is loaded.
 
 ## Loading a level from the command line
 
@@ -70,6 +82,37 @@ of its per-controller profile record, on by default) and the local player is in
 play: while spectating (`pm_type` 5) or following another player it clears every
 rumble each frame. A headless test has to spawn first (`MW2_WALK_PATH`) and then
 fire (`MW2_INPUT_SCRIPT`).
+
+## Signing in
+
+The first controller's player is the one the online service logged in, signed
+in from the start. Nobody is at the others until the sign-in screen puts
+someone there (`runtime/signin.cpp`), and nothing of it is kept between runs.
+It is the console's screen, which a title asks for with `XamShowSigninUI` and
+never draws: the multiplayer asks from SIGN IN PROFILE and CHANGE PROFILE in
+split screen, and when a controller nobody is signed in at chooses SYSTEM
+LINK. The Guide button opens it too, as on the console, or Back and Start
+together where the system keeps that button.
+
+The console's screen also signs a guest in beside a player on Live. This one
+does not: the title's split screen is offline only, and its system link takes
+one player a copy.
+
+It lists the profiles of this machine that are not already playing, and "New
+profile", which makes "Player 2" or the next free number. A profile is a line
+of `saves/profiles.txt`, twelve hexadecimal digits and a name, and is signed in
+locally (state 1) under the offline XUID `0xE000` over those digits; the title
+names its stats by that XUID and its settings are `profile_<digits>.bin`
+([saves.md](saves.md)). The launcher's PROFILE screen renames one.
+
+The screen opens for the controller pressed last, since the call does not say
+which. While it is open the title reads every controller as idle and hears
+`XN_SYS_UI`; a choice is `XN_SYS_SIGNINCHANGED` with a bit per signed-in
+controller, on which the title reads the new profile, stopping for a second.
+
+The picture is drawn on the CPU with the launcher's fonts and laid over the
+middle of the frame by the presenter, as a copy: it is opaque.
+`MW2_DUMP_FRAMES` writes each state of it as `signin_<n>.ppm`.
 
 ## The save-device prompt
 

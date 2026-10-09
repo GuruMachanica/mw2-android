@@ -3,6 +3,7 @@
 #include "renderer_state.h"
 #include "../../diagnostics.h"
 #include "../../log.h"
+#include "../../report.h"
 
 #include <cstdio>
 
@@ -26,8 +27,10 @@ namespace vk::renderer::detail
             stutters::Timed timed(stutters::kShaders);
             const auto translateStart = std::chrono::steady_clock::now();
             entry = BuildShader(type, code, words);
-            g.translateMicroseconds += uint64_t(std::chrono::duration_cast<std::chrono::microseconds>(
+            const uint64_t took = uint64_t(std::chrono::duration_cast<std::chrono::microseconds>(
                 std::chrono::steady_clock::now() - translateStart).count());
+            g.translateMicroseconds += took;
+            report::Add(report::kShader, took);
             g.shadersBuiltAtDraw++;
         }
         const bool ok = entry.module != VK_NULL_HANDLE;
@@ -260,8 +263,10 @@ namespace vk::renderer::detail
         // compiled here, on a device that cannot.
         VkPipeline built = vertex.library && pixel.library ? LinkPipeline(key, vertex, pixel)
                                                            : BuildPipeline(key, vertex, pixel);
-        g.compileMicroseconds += uint64_t(std::chrono::duration_cast<std::chrono::microseconds>(
+        const uint64_t took = uint64_t(std::chrono::duration_cast<std::chrono::microseconds>(
             std::chrono::steady_clock::now() - compileStart).count());
+        g.compileMicroseconds += took;
+        report::Add(report::kPipeline, took);
         if (!built)
             LOGW("renderer: pipeline for %016llX/%016llX rejected",
                  (unsigned long long)key.vertexShader, (unsigned long long)key.pixelShader);

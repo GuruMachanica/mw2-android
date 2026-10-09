@@ -123,6 +123,8 @@ set 2  binding 0  uint[]   the frame arena, as dwords
 push constants
   pixel  (offset 0, 16 B)   alpha function, alpha reference, colour scale, gamma-target flag
   vertex (offset 16, 16 B)  float2 scale, float2 offset: window to clip space
+  both   (offset 32, 4 B)   a bit per texture slot bound to a resolve's copy;
+                            only in shaders built under MW2_SCALE
 ```
 
 - The hardware constant file holds 512 vec4; `SQ_VS_CONST` and `SQ_PS_CONST`
@@ -135,7 +137,9 @@ push constants
 - A vertex shader writes `gl_Position` and all sixteen interpolators to
   locations 0..15 (zero until written), because a pixel-shader input with no
   vertex output behind it is invalid. A pixel shader reads the interpolators it
-  uses and writes only the colour targets it exports (locations 0..3).
+  uses and writes only the colour targets it exports (locations 0..3). The
+  ones it uses are the low temporaries any instruction reads, a texture
+  fetch's coordinates included: some are read by nothing else.
 - Set 1 declares a slot as 2D, cube or 3D according to how the program fetches
   it (`Translation::textureKinds`); 1D fetches are sampled as 2D at v = 0.
 
@@ -266,7 +270,10 @@ constant ([textures.md](textures.md)). The translator:
   (u for 1D, u/v for 2D, all three for 3D and cube);
 - applies the fetch's half-texel offsets, plus a 1.5/1024-texel nudge on every
   axis (Xenia's value) so a point sample on a texel boundary lands where the
-  console's fixed-point coordinates (8 fractional bits) put it;
+  console's fixed-point coordinates (8 fractional bits) put it. Offsets and
+  unnormalised coordinates are in texels of the bound image's size, which
+  under `MW2_SCALE` is divided by the scale for a slot bound to a resolve's
+  copy ([rendering.md](rendering.md#resolution-scale));
 - computes LOD from the fetch constant's LOD bias (dword 4 bits 12..21, signed,
   in 32nds, read from binding 1 at run time), the instruction's own bias (in
   16ths) and, when `use_register_lod` is set, the `set_lod` value;

@@ -54,9 +54,12 @@ namespace vk::renderer
 
     void Draw(const gpu::RegisterFile& registers, const DrawCall& call);
 
-    // A draw issued in copy mode: end the frame and copy the colour target where
-    // the copy registers say it goes.
+    // A draw issued in copy mode: copy the colour or depth target where the
+    // copy registers say it goes.
     void Resolve(const gpu::RegisterFile& registers);
+
+    // The swap packet: the frame is what was resolved to this front buffer.
+    void Swap(uint32_t frontBuffer);
 
     // The title's own occlusion query, bracketed by two EVENT_WRITE_ZPD events.
     // Everything drawn between the two is counted. The count is ready when the

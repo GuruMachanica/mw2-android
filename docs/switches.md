@@ -3,18 +3,28 @@
 The runtime is configured through `MW2_*` environment variables. A flag is on
 when set to anything but empty or `0` (`runtime/env.h`).
 
+## The settings file
+
+A file named `.env` beside the executables (in the current directory for a
+development run) holds switches as `NAME=value`, one a line. The runtime reads
+it first thing (`runtime/settings.cpp`) and sets each `MW2_` switch the
+environment does not already have, so a variable given on the command line
+decides. The launcher writes its own settings there (RESOLUTION is
+`MW2_SCALE`) and keeps the other lines.
+
 Switches marked **R** are read by every build. The rest are diagnostic: a build
 without diagnostics (`RELEASE=1 ./build.sh`, `-DMW2_DIAGNOSTICS=OFF`) treats
-them as unset whatever the environment says, and also drops the keys `F7`,
+them as unset whatever the environment says, and also drops the keys `F5`, `F7`,
 `F9`, `F10` and `F11`, `kill -USR2` and the end-of-run reports.
 
 ## Running
 
 | switch | | effect |
 |---|---|---|
-| `MW2_WINDOW=0\|1` | R | opens the window. A release build opens it unless `MW2_WINDOW=0`; a diagnostic build only with `MW2_WINDOW=1`. Closing it ends the run as `MW2_RUN_SECONDS` does, with the reports. The frame keeps its proportions in any window shape |
+| `MW2_WINDOW=0\|1` | R | the window, which every build opens; `MW2_WINDOW=0` keeps it shut, for a headless run. Closing it ends the run as `MW2_RUN_SECONDS` does, with the reports. The frame keeps its proportions in any window shape |
 | `MW2_FULLSCREEN=1` | R | starts fullscreen, borderless at the desktop's resolution. `F8` toggles it |
-| `MW2_LOG_FILE=<path>` | R | writes the log there, creating its folder. The log goes to stderr, so `> file` does not catch it |
+| `MW2_LOG_FILE=<path>` | R | writes the log there, creating its folder. The log goes to stderr, so `> file` does not catch it. A title started from the other one's menus writes on in the same file |
+| `MW2_REPORT=1` | R | what a bug report needs, as the launcher's REPORT A BUG sets it: the log names the graphics driver and ends with the run's frame rate, frame time spread and what was compiled at a draw ([building.md](building.md)) |
 | `MW2_LOG_TIME=1` | | stamps every log line with the time since start |
 | `MW2_CONSOLE="30:map af_caves;45:god"` | R | queues commands into the title's console command buffer at the given wall-clock seconds; see [gameplay.md](gameplay.md) |
 | `MW2_NET_LINK=0\|1` | R | whether the Ethernet link is reported up. Default down for the campaign, up for the multiplayer, which starts no match without one |
@@ -23,7 +33,7 @@ them as unset whatever the environment says, and also drops the keys `F7`,
 | `MW2_RUN_SECONDS=<n>` | | reports and exits after n seconds |
 | `MW2_WATCHDOG=<seconds>` | | when it fires: the `MW2_DUMP` blocks, what every guest thread is blocked on (handle and caller) or spinning on, and every thread's backtrace, which is the guest call stack; then exits |
 | `kill -USR2 <pid>` | | every thread's stack, as the watchdog prints them, and the run continues (Linux). Sent a few times, it tells a stuck thread from a looping one |
-| `MW2_INPUT_SCRIPT="20:start,26:a"` | | presses pad inputs at wall-clock seconds. An entry names a button (`a b x y lb rb start back up down left right lthumb rthumb`), a trigger (`lt`, `rt`) or a stick direction (`lx+ lx- ly+ ly- rx+ rx- ry+ ry-`), with an optional hold time: `"40:lt:25"` holds the left trigger 25 s. Default hold 0.2 s |
+| `MW2_INPUT_SCRIPT="20:start,26:a"` | | presses pad inputs at wall-clock seconds. An entry names a button (`a b x y lb rb start back up down left right lthumb rthumb`), a trigger (`lt`, `rt`) or a stick direction (`lx+ lx- ly+ ly- rx+ rx- ry+ ry-`), with an optional hold time: `"40:lt:25"` holds the left trigger 25 s. Default hold 0.2 s. A name ending in `@2`, `@3` or `@4` is that player's controller, which the script then stands in for: `"5:a@2"`. `guide` is the Guide button, which opens the sign-in screen |
 
 ## Online
 
@@ -52,6 +62,7 @@ walking to it.
 | `MW2_WALK_PAUSE=<seconds>` | stands still at every corner of the route |
 | `MW2_QUIT_AFTER_ARRIVAL=<seconds>` | ends the run that long after the walk arrives, or after it stops getting nearer for `MW2_QUIT_IF_STUCK` seconds (45) |
 | `MW2_RECORD_PATH=<file>` | writes where the player goes as a route for `MW2_WALK_PATH`, a point every `MW2_RECORD_SPACING` units (110), with d-pad left and right-trigger presses and their aim |
+| `MW2_F5=<command>` | with the window open, `F5` runs that console command: `MW2_F5=noclip` after `devmap`, to fly once a level's opening is behind |
 | `MW2_TRACE_VIEWPOS=1` | logs where the player stands once a second |
 | `F9` | with the window open and `MW2_ENGINE_LOG=1`: runs the title's `viewpos` and logs the position, whose five numbers `setviewpos x y z yaw pitch` takes in single player |
 
@@ -80,10 +91,11 @@ walking to it.
 
 | switch | | effect |
 |---|---|---|
+| `MW2_SCALE=<2 or 3>` | R | draws every surface that many times wider and taller than the title's: a 2560x1440 or 3840x2160 frame. The launcher's RESOLUTION entry sets it in the settings file ([rendering.md](rendering.md#resolution-scale)) |
 | `MW2_MSAA=<n>` | R | draws every surface the title multisamples at n samples, rounded down to what the device offers |
 | `MW2_NO_MSAA=1` | R | draws the title's 2x and 4x surfaces at one sample |
 | `MW2_ARENA_MB=<n>` | R | the upload arena for constants, vertices and indices, shared by the frame slots (512) |
-| `MW2_TEXTURE_BUDGET_MB=<n>` | R | the texture cache's budget before it evicts what has not been bound lately (default half the device-local memory, within 256 MB to 2 GB) |
+| `MW2_TEXTURE_BUDGET_MB=<n>` | R | the texture cache's budget, past which it lets go of what has not been bound lately, even textures whose memory is unchanged (default half the device-local memory, within 256 MB to 2 GB) |
 | `MW2_PIPELINE_CACHE=<file>` | R | keeps the driver's compiled pipelines across runs |
 | `MW2_SHADER_CACHE=<file>` | R | records every pipeline a run needed and builds them at the next start-up |
 | `MW2_NO_PIPELINE_LIBRARIES=1` | R | builds each pipeline whole at its first draw instead of linking it from shaders compiled at load ([rendering.md](rendering.md)) |
@@ -100,7 +112,7 @@ walking to it.
 | `MW2_RECORD_THREAD=0` | | makes the Vulkan calls on the ring consumer instead of the recorder thread |
 | `MW2_TIME_RENDER=1` | | where the ring consumer's time goes, and how long it waits on the GPU |
 | `MW2_TRACE_PACING=<file>` | | a timeline written at exit: the consumer's batches and swaps, the title's presents, and every guest thread's engine waits, kernel waits and sleeps with their callers ([multiplayer.md](multiplayer.md)) |
-| `MW2_STUTTERS=1` | | from the first 30 consecutive world frames on, logs `STUTTER` for every world frame 25 ms or more after the previous one, with what the renderer spent the gap on, and `DISPLAY` when a frame is held or dropped by the window; totals at exit. The pad's Y and `F7` log a `STUTTER MARK` |
+| `MW2_STUTTERS=1` | | from the first 30 consecutive world frames on, logs `STUTTER` for every world frame 25 ms or more after the previous one, with what the renderer spent the gap on, and `DISPLAY` when a frame is held or dropped by the window; totals at exit. When play stops for a second it logs `STALL` with what every guest thread waits on and every thread's stack (Linux), once a stall. The pad's Y and `F7` log a `STUTTER MARK` |
 
 ## Frames and captures
 

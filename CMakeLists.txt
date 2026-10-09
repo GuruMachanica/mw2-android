@@ -33,12 +33,21 @@ elseif(MW2_TITLE STREQUAL "mp")
 else()
     message(FATAL_ERROR "MW2_TITLE must be sp or mp, not '${MW2_TITLE}'")
 endif()
+# And which version of it: the one title update 6 makes of the disc's (tu6),
+# or the disc's own (tu0), recompiled into ppc_tu0/ and ppc_mp_tu0/.
+set(MW2_VERSION "tu6" CACHE STRING "Which version of the executable: tu6 (title update 6) or tu0 (the disc's)")
+if(MW2_VERSION STREQUAL "tu0")
+    set(MW2_PPC_DIR "${MW2_PPC_DIR}_tu0")
+    add_compile_definitions(MW2_VERSION_TU0=1)
+elseif(NOT MW2_VERSION STREQUAL "tu6")
+    message(FATAL_ERROR "MW2_VERSION must be tu6 or tu0, not '${MW2_VERSION}'")
+endif()
 
 # ---- recompiled guest code -------------------------------------------------
 file(GLOB PPC_SOURCES CONFIGURE_DEPENDS "${MW2_PPC_DIR}/ppc_recomp.*.cpp")
 list(APPEND PPC_SOURCES "${MW2_PPC_DIR}/ppc_func_mapping.cpp")
 if(NOT PPC_SOURCES)
-    message(FATAL_ERROR "${MW2_PPC_DIR} is empty -- run TITLE=${MW2_TITLE} ./build.sh first to generate it")
+    message(FATAL_ERROR "${MW2_PPC_DIR} is empty -- run TITLE=${MW2_TITLE} VERSION=${MW2_VERSION} ./build.sh first to generate it")
 endif()
 
 add_library(ppc_recomp STATIC ${PPC_SOURCES})
@@ -74,7 +83,7 @@ if(ANDROID)
     # The window, the touch pad, the AAudio sink, the driver loader and the
     # JNI surface the app talks to (docs/android.md).
     file(GLOB ANDROID_SOURCES CONFIGURE_DEPENDS "${CMAKE_SOURCE_DIR}/runtime/android/*.cpp")
-    list(APPEND RUNTIME_SOURCES ${ANDROID_SOURCES})
+    list(APPEND RUNTIME_SOURCES ${ANDROID_SOURCES} "${CMAKE_SOURCE_DIR}/launcher/disc.cpp")
 endif()
 
 # The glue build.sh generates from the recompiled output -- a stub for every
@@ -82,13 +91,26 @@ endif()
 # lives beside that output, since it is different for each title.
 # ---- online service --------------------------------------------------------
 # What the title's network calls reach (runtime/online/service.h): "none" keeps
-# system link on this machine, "lan" is plain UDP between machines. A backend is
-# the one file runtime/online/<name>.cpp.
-set(MW2_ONLINE "none" CACHE STRING "Online service backend: a file name under runtime/online/")
-set(MW2_ONLINE_SOURCE "${CMAKE_SOURCE_DIR}/runtime/online/${MW2_ONLINE}.cpp")
-if(NOT EXISTS "${MW2_ONLINE_SOURCE}" OR MW2_ONLINE STREQUAL "service")
-    message(FATAL_ERROR "MW2_ONLINE=${MW2_ONLINE}: there is no runtime/online/${MW2_ONLINE}.cpp")
+# system link on this machine, "lan" is plain UDP between machines, "steam" is
+# Steam, with lan behind it for when Steam is not running. A backend is the one
+# file runtime/online/<name>.cpp; the runtime tries them in service.cpp's order.
+set(MW2_ONLINE "none" CACHE STRING "Online service: none, lan or steam")
+if(MW2_ONLINE STREQUAL "none")
+    set(MW2_ONLINE_BACKENDS "")
+elseif(MW2_ONLINE STREQUAL "lan")
+    set(MW2_ONLINE_BACKENDS lan)
+elseif(MW2_ONLINE STREQUAL "steam")
+    set(MW2_ONLINE_BACKENDS steam lan)
+else()
+    message(FATAL_ERROR "MW2_ONLINE=${MW2_ONLINE}: none, lan or steam")
 endif()
+set(MW2_ONLINE_SOURCES "")
+set(MW2_ONLINE_DEFINITIONS "")
+foreach(backend ${MW2_ONLINE_BACKENDS})
+    list(APPEND MW2_ONLINE_SOURCES "${CMAKE_SOURCE_DIR}/runtime/online/${backend}.cpp")
+    string(TOUPPER "${backend}" backend_upper)
+    list(APPEND MW2_ONLINE_DEFINITIONS "MW2_ONLINE_${backend_upper}=1")
+endforeach()
 message(STATUS "Online service: ${MW2_ONLINE}")
 
 # On Android there is no process of ours to be the executable: the app's
@@ -98,28 +120,22 @@ message(STATUS "Online service: ${MW2_ONLINE}")
 if(ANDROID)
     add_library(mw2 SHARED ${RUNTIME_SOURCES}
         "${CMAKE_SOURCE_DIR}/runtime/online/service.cpp"
-        "${MW2_ONLINE_SOURCE}"
+        ${MW2_ONLINE_SOURCES}
         "${MW2_PPC_DIR}/stubs_generated.cpp")
 else()
     add_executable(mw2 ${RUNTIME_SOURCES}
         "${CMAKE_SOURCE_DIR}/runtime/online/service.cpp"
-        "${MW2_ONLINE_SOURCE}"
+        ${MW2_ONLINE_SOURCES}
         "${MW2_PPC_DIR}/stubs_generated.cpp")
 endif()
 target_link_libraries(mw2 PRIVATE ppc_recomp)
+target_compile_definitions(mw2 PRIVATE ${MW2_ONLINE_DEFINITIONS})
 if(MW2_DIAGNOSTICS)
     target_compile_definitions(mw2 PRIVATE MW2_DIAGNOSTICS=1)
 else()
     target_compile_definitions(mw2 PRIVATE MW2_DIAGNOSTICS=0)
 endif()
 target_include_directories(mw2 PRIVATE "${CMAKE_SOURCE_DIR}/runtime")
-# The installer accepts only the executables this build was recompiled from
-# (runtime/install/install.cpp); both, since either executable installs both.
-#
-# Normally the two hashes are taken from mw2/. A build that has the recompiled
-# sources but not the disc -- the Android job, which compiles a tree another
-# machine produced -- can be handed them instead:
-#   -DMW2_XEX_SHA256_SP=<64 hex> -DMW2_XEX_SHA256_MP=<64 hex>
 if(MW2_XEX_SHA256_SP AND MW2_XEX_SHA256_MP)
     # CMake's regexes have no {n} repetition -- "{64}" would be matched as
     # those four characters -- so the length is counted separately.
@@ -132,23 +148,57 @@ if(MW2_XEX_SHA256_SP AND MW2_XEX_SHA256_MP)
                 " ${hash_length}): ${hash}")
         endif()
     endforeach()
+    if(NOT MW2_DISC_SHA256_SP)
+        set(MW2_DISC_SHA256_SP "${MW2_XEX_SHA256_SP}")
+        set(MW2_DISC_SHA256_MP "${MW2_XEX_SHA256_MP}")
+    endif()
+    set(MW2_HASH_DEFINITIONS
+        MW2_XEX_SHA256_SP="${MW2_XEX_SHA256_SP}" MW2_XEX_SHA256_MP="${MW2_XEX_SHA256_MP}"
+        MW2_DISC_SHA256_SP="${MW2_DISC_SHA256_SP}" MW2_DISC_SHA256_MP="${MW2_DISC_SHA256_MP}")
+    target_compile_definitions(mw2 PRIVATE ${MW2_HASH_DEFINITIONS})
     message(STATUS "XEX hashes given on the command line; mw2/ is not needed")
 else()
-    foreach(xex default default_mp)
-        set(xex_path "${CMAKE_SOURCE_DIR}/mw2/${xex}.xex")
-        if(NOT EXISTS "${xex_path}")
-            message(FATAL_ERROR "${xex_path} is missing -- build.sh extracts it from the ISO"
-                                " (or pass -DMW2_XEX_SHA256_SP= and -DMW2_XEX_SHA256_MP=)")
+    if(MW2_VERSION STREQUAL "tu0")
+        set(MW2_XEX_DIR "${CMAKE_SOURCE_DIR}/mw2/tu0")
+    else()
+        set(MW2_XEX_DIR "${CMAKE_SOURCE_DIR}/mw2")
+    endif()
+    function(mw2_sha256 variable path)
+        if(NOT EXISTS "${path}")
+            message(FATAL_ERROR "${path} is missing -- build.sh makes it from the ISO and the title update")
         endif()
-        set_property(DIRECTORY APPEND PROPERTY CMAKE_CONFIGURE_DEPENDS "${xex_path}")
-        file(SHA256 "${xex_path}" xex_sha256)
-        list(APPEND MW2_XEX_HASHES "${xex_sha256}")
-    endforeach()
-    list(GET MW2_XEX_HASHES 0 MW2_XEX_SHA256_SP)
-    list(GET MW2_XEX_HASHES 1 MW2_XEX_SHA256_MP)
+        set_property(DIRECTORY APPEND PROPERTY CMAKE_CONFIGURE_DEPENDS "${path}")
+        file(SHA256 "${path}" hash)
+        set(${variable} "${hash}" PARENT_SCOPE)
+    endfunction()
+    if(EXISTS "${MW2_XEX_DIR}/default.xex")
+        mw2_sha256(MW2_XEX_SHA256_SP  "${MW2_XEX_DIR}/default.xex")
+        mw2_sha256(MW2_XEX_SHA256_MP  "${MW2_XEX_DIR}/default_mp.xex")
+    else()
+        mw2_sha256(MW2_XEX_SHA256_SP  "${CMAKE_SOURCE_DIR}/mw2/default.xex")
+        mw2_sha256(MW2_XEX_SHA256_MP  "${CMAKE_SOURCE_DIR}/mw2/default_mp.xex")
+    endif()
+    if(EXISTS "${CMAKE_SOURCE_DIR}/mw2/tu0/default.xex")
+        mw2_sha256(MW2_DISC_SHA256_SP "${CMAKE_SOURCE_DIR}/mw2/tu0/default.xex")
+        mw2_sha256(MW2_DISC_SHA256_MP "${CMAKE_SOURCE_DIR}/mw2/tu0/default_mp.xex")
+    else()
+        set(MW2_DISC_SHA256_SP "${MW2_XEX_SHA256_SP}")
+        set(MW2_DISC_SHA256_MP "${MW2_XEX_SHA256_MP}")
+    endif()
+    set(MW2_HASH_DEFINITIONS
+        MW2_XEX_SHA256_SP="${MW2_XEX_SHA256_SP}" MW2_XEX_SHA256_MP="${MW2_XEX_SHA256_MP}"
+        MW2_DISC_SHA256_SP="${MW2_DISC_SHA256_SP}" MW2_DISC_SHA256_MP="${MW2_DISC_SHA256_MP}")
+    if(NOT MW2_VERSION STREQUAL "tu0" AND EXISTS "${CMAKE_SOURCE_DIR}/mw2/update/patch_mp.ff")
+        mw2_sha256(MW2_UPDATE_SHA256_PATCH_MP   "${CMAKE_SOURCE_DIR}/mw2/update/patch_mp.ff")
+        mw2_sha256(MW2_UPDATE_SHA256_DLC1_UI_MP "${CMAKE_SOURCE_DIR}/mw2/update/dlc1_ui_mp.ff")
+        mw2_sha256(MW2_UPDATE_SHA256_DLC2_UI_MP "${CMAKE_SOURCE_DIR}/mw2/update/dlc2_ui_mp.ff")
+        list(APPEND MW2_HASH_DEFINITIONS
+            MW2_UPDATE_SHA256_PATCH_MP="${MW2_UPDATE_SHA256_PATCH_MP}"
+            MW2_UPDATE_SHA256_DLC1_UI_MP="${MW2_UPDATE_SHA256_DLC1_UI_MP}"
+            MW2_UPDATE_SHA256_DLC2_UI_MP="${MW2_UPDATE_SHA256_DLC2_UI_MP}")
+    endif()
+    target_compile_definitions(mw2 PRIVATE ${MW2_HASH_DEFINITIONS})
 endif()
-target_compile_definitions(mw2 PRIVATE
-    MW2_XEX_SHA256_SP="${MW2_XEX_SHA256_SP}" MW2_XEX_SHA256_MP="${MW2_XEX_SHA256_MP}")
 if(WIN32)
     # One executable with nothing beside it: the C++ runtime and the threads
     # linked in. The recompiled code nests deep on the host stack, and a thread
@@ -247,6 +297,7 @@ add_executable(upload-texture
     "${CMAKE_SOURCE_DIR}/tools/upload_texture.cpp"
     "${CMAKE_SOURCE_DIR}/runtime/gpu/texture.cpp"
     "${CMAKE_SOURCE_DIR}/runtime/gpu/vulkan/texture_cache.cpp"
+    "${CMAKE_SOURCE_DIR}/runtime/gpu/vulkan/image_memory.cpp"
     "${CMAKE_SOURCE_DIR}/runtime/gpu/vulkan/texture_formats.cpp"
     "${CMAKE_SOURCE_DIR}/runtime/gpu/vulkan/pipeline.cpp"
     "${CMAKE_SOURCE_DIR}/runtime/gpu/vulkan/shader_translator.cpp"
@@ -256,4 +307,102 @@ if(Vulkan_FOUND)
     target_link_libraries(upload-texture PRIVATE Vulkan::Vulkan)
     target_compile_definitions(upload-texture PRIVATE MW2_HAVE_VULKAN=1)
 endif()
+endif()
+
+# ---- launcher --------------------------------------------------------------
+# What a player opens (launcher/): it installs the game and starts it. One
+# executable with nothing beside it, like the game's: Dear ImGui on SDL's own
+# renderer, the fonts as arrays, and XenonRecomp's patcher, which applies the
+# title update, compiled in from its checkout.
+if(MW2_USE_SDL)
+    enable_language(C)
+    FetchContent_Declare(imgui
+        GIT_REPOSITORY https://github.com/ocornut/imgui.git
+        GIT_TAG v1.91.9b
+        GIT_SHALLOW TRUE)
+    FetchContent_MakeAvailable(imgui)
+
+    # third_party/fonts/*.ttf as C arrays.
+    set(MW2_FONTS_SOURCE "${CMAKE_BINARY_DIR}/launcher_fonts.cpp")
+    set(fonts_text "// Generated by CMake from third_party/fonts/.\n")
+    foreach(font "Menu=BarlowCondensed-Regular" "Heading=BarlowCondensed-Medium" "Body=BarlowSemiCondensed-Regular")
+        string(REPLACE "=" ";" font "${font}")
+        list(GET font 0 font_name)
+        list(GET font 1 font_file)
+        set(font_path "${CMAKE_SOURCE_DIR}/third_party/fonts/${font_file}.ttf")
+        set_property(DIRECTORY APPEND PROPERTY CMAKE_CONFIGURE_DEPENDS "${font_path}")
+        file(READ "${font_path}" font_hex HEX)
+        string(LENGTH "${font_hex}" font_length)
+        math(EXPR font_size "${font_length} / 2")
+        string(REGEX REPLACE "([0-9a-f][0-9a-f])" "0x\\1," font_bytes "${font_hex}")
+        string(APPEND fonts_text "extern const unsigned char kFont${font_name}[] = { ${font_bytes} };\n"
+                                 "extern const unsigned kFont${font_name}Size = ${font_size};\n")
+    endforeach()
+    # The window's icon the same way (tools/launcher_icon.py makes it).
+    set(icon_path "${CMAKE_SOURCE_DIR}/launcher/icon/launcher.bmp")
+    set_property(DIRECTORY APPEND PROPERTY CMAKE_CONFIGURE_DEPENDS "${icon_path}")
+    file(READ "${icon_path}" icon_hex HEX)
+    string(LENGTH "${icon_hex}" icon_length)
+    math(EXPR icon_size "${icon_length} / 2")
+    string(REGEX REPLACE "([0-9a-f][0-9a-f])" "0x\\1," icon_bytes "${icon_hex}")
+    string(APPEND fonts_text "extern const unsigned char kIcon[] = { ${icon_bytes} };\n"
+                             "extern const unsigned kIconSize = ${icon_size};\n")
+    file(GENERATE OUTPUT "${MW2_FONTS_SOURCE}" CONTENT "${fonts_text}")
+
+    # The game draws its sign-in screen (runtime/signin.cpp) with the same
+    # fonts, rasterised by the stb_truetype that comes with Dear ImGui.
+    target_sources(mw2 PRIVATE "${MW2_FONTS_SOURCE}")
+    target_include_directories(mw2 PRIVATE "${imgui_SOURCE_DIR}")
+    target_compile_definitions(mw2 PRIVATE MW2_SIGNIN_PICTURE=1)
+
+    set(XENON "${CMAKE_SOURCE_DIR}/XenonRecomp")
+    file(GLOB LAUNCHER_SOURCES CONFIGURE_DEPENDS "${CMAKE_SOURCE_DIR}/launcher/*.cpp")
+    add_executable(launcher ${LAUNCHER_SOURCES}
+        "${MW2_FONTS_SOURCE}"
+        "${CMAKE_SOURCE_DIR}/runtime/install/crypto.cpp"
+        "${CMAKE_SOURCE_DIR}/runtime/install/xex.cpp"
+        "${imgui_SOURCE_DIR}/imgui.cpp"
+        "${imgui_SOURCE_DIR}/imgui_draw.cpp"
+        "${imgui_SOURCE_DIR}/imgui_tables.cpp"
+        "${imgui_SOURCE_DIR}/imgui_widgets.cpp"
+        "${imgui_SOURCE_DIR}/backends/imgui_impl_sdl3.cpp"
+        "${imgui_SOURCE_DIR}/backends/imgui_impl_sdlrenderer3.cpp"
+        "${XENON}/XenonUtils/xex_patcher.cpp"
+        "${XENON}/XenonUtils/memory_mapped_file.cpp"
+        "${XENON}/thirdparty/libmspack/libmspack/mspack/lzxd.c"
+        "${XENON}/thirdparty/tiny-AES-c/aes.c")
+    set_target_properties(launcher PROPERTIES OUTPUT_NAME mw2-launcher)
+    target_include_directories(launcher PRIVATE
+        "${imgui_SOURCE_DIR}" "${imgui_SOURCE_DIR}/backends"
+        "${XENON}/XenonUtils" "${XENON}/thirdparty/simde"
+        "${XENON}/thirdparty/libmspack/libmspack/mspack"
+        "${XENON}/thirdparty/tiny-AES-c" "${XENON}/thirdparty/TinySHA1")
+    target_compile_definitions(launcher PRIVATE ${MW2_HASH_DEFINITIONS} NOMINMAX)
+    # What release this is, for the launcher to look for a newer one: the
+    # release workflow gives the tag. A build without one does not update.
+    set(MW2_RELEASE_TAG "" CACHE STRING "The release tag this build is published as, e.g. v0.3.0")
+    if(WIN32)
+        set(MW2_RELEASE_KIND "windows-${MW2_ONLINE}")
+    else()
+        set(MW2_RELEASE_KIND "linux-${MW2_ONLINE}")
+    endif()
+    set_source_files_properties("${CMAKE_SOURCE_DIR}/launcher/update.cpp" PROPERTIES COMPILE_DEFINITIONS
+        "MW2_RELEASE_TAG=\"${MW2_RELEASE_TAG}\";MW2_RELEASE_KIND=\"${MW2_RELEASE_KIND}\"")
+    target_link_libraries(launcher PRIVATE SDL3::SDL3-static)
+    if(WIN32)
+        # The program's icon, as Explorer and the taskbar show it.
+        enable_language(RC)
+        target_sources(launcher PRIVATE "${CMAKE_SOURCE_DIR}/launcher/icon/launcher.rc")
+        target_include_directories(launcher PRIVATE "${CMAKE_SOURCE_DIR}/launcher/compat")
+        target_link_libraries(launcher PRIVATE urlmon)
+        target_link_options(launcher PRIVATE -static)
+        if(NOT MW2_DIAGNOSTICS)
+            target_link_options(launcher PRIVATE -mwindows)
+        endif()
+    else()
+        target_link_libraries(launcher PRIVATE pthread)
+        if(MW2_PORTABLE)
+            target_link_options(launcher PRIVATE -static-libstdc++ -static-libgcc)
+        endif()
+    endif()
 endif()

@@ -6,6 +6,7 @@
 #include "texture_cache.h"
 #include "../../log.h"
 #include "../../pacing_trace.h"
+#include "../../report.h"
 
 #ifdef MW2_HAVE_VULKAN
 
@@ -280,6 +281,7 @@ namespace vk::renderer::detail
         }
         pacing::Note(pacing::kFrame, worldDrawn ? 1 : 0);
         stutters::Finished(g.frames, worldDrawn);
+        report::Frame(worldDrawn);
         NoteFrame(worldDrawn);
         if (worldDrawn)
         {
@@ -341,6 +343,8 @@ namespace
                                   VK_QUERY_RESULT_64_BIT | VK_QUERY_RESULT_WAIT_BIT) != VK_SUCCESS)
             return;
         for (uint32_t i = 0; i < query.count; i++) query.samples += samples[i];
+        // The title compares the count with numbers of its own pixels.
+        query.samples /= uint64_t(g.scale) * g.scale;
     }
 }
 

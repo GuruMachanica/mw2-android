@@ -8,6 +8,7 @@
 #include "../console.h"
 #include "../online/service.h"
 #include "../player.h"
+#include "../signin.h"
 #include "../stutters.h"
 #include "../gpu/vulkan/renderer.h"
 
@@ -113,6 +114,7 @@ namespace
         { "right", BTN_DPAD_RIGHT }, { "start", BTN_START }, { "back", BTN_BACK },
         { "lthumb", BTN_LTHUMB }, { "rthumb", BTN_RTHUMB }, { "lb", BTN_LB },
         { "rb", BTN_RB }, { "a", BTN_A }, { "b", BTN_B }, { "x", BTN_X }, { "y", BTN_Y },
+        { "guide", signin::kGuide },
     };
 
     // The keyboard, for when there is no controller. Only useful with the window
@@ -149,18 +151,21 @@ namespace
     // trigger is held -- MW2 turns its depth of field on when the player aims --
     // and some screens only respond to a stick: the first-boot brightness screen
     // will not accept anything until the slider has been moved, so a run that
-    // only presses buttons sits on it forever.
+    // only presses buttons sits on it forever. A name ending in `@2`, `@3` or
+    // `@4` is that player's controller, which the script then stands in for:
+    // "5:a@2" is the second player's A.
     // `bit` names a button; the trigger and stick pseudo-names set `trigger` or
     // `axis` instead, and `held` is how long the press lasts.
     struct Press
     {
         double at; uint16_t bit; int trigger = -1; double held = 0.2;
-        int axis = -1; int16_t value = 0;
+        int axis = -1; int16_t value = 0; uint32_t user = 0;
     };
     std::vector<Press> g_script;
-    uint8_t g_scriptTriggers[2]{};
-    int16_t g_scriptAxes[4]{};
-    bool g_scriptAxisHeld[4]{};
+    uint8_t g_scriptTriggers[4][2]{};
+    int16_t g_scriptAxes[4][4]{};
+    bool g_scriptAxisHeld[4][4]{};
+    bool g_scripted[4]{};   // the script presses something on this controller
 
     // "lx+" is the left stick's X pushed fully one way, "ly-" the other.
     bool NamedAxis(const std::string& name, int& axis, int16_t& value)
@@ -176,7 +181,7 @@ namespace
     std::once_flag g_scriptOnce;
     std::chrono::steady_clock::time_point g_scriptStart;
 
-    uint16_t ScriptedButtons()
+    uint16_t ScriptedButtons(uint32_t user)
     {
         if constexpr (!diag::kOn) return 0;
         std::call_once(g_scriptOnce, [] {
@@ -200,6 +205,13 @@ namespace
                         if (held <= 0.0) held = 0.2;
                         name = name.substr(0, second);
                     }
+                    uint32_t user = 0;
+                    if (name.size() > 2 && name[name.size() - 2] == '@')
+                    {
+                        user = uint32_t(name.back() - '1') & 3;
+                        name.resize(name.size() - 2);
+                    }
+                    const size_t before = g_script.size();
                     int axis = -1; int16_t value = 0;
                     if (name == "lt" || name == "rt")
                         g_script.push_back({ when, 0, name == "lt" ? 0 : 1, held });
@@ -209,6 +221,8 @@ namespace
                         for (const Named& button : kButtons)
                             if (name == button.name)
                                 g_script.push_back({ when, button.bit, -1, held });
+                    for (size_t i = before; i < g_script.size(); i++) g_script[i].user = user;
+                    if (g_script.size() > before) g_scripted[user] = true;
                 }
                 if (!comma) break;
                 at = comma + 1;
@@ -216,15 +230,15 @@ namespace
             static const char* kAxisNames[4] = { "left stick X", "left stick Y",
                                                  "right stick X", "right stick Y" };
             for (const Press& press : g_script)
-                LOGI("input: scripted %s at %.2f s for %.2f s (%04X)",
+                LOGI("input: controller %u, scripted %s at %.2f s for %.2f s (%04X)", press.user,
                      press.axis >= 0 ? kAxisNames[press.axis]
                                      : press.trigger < 0 ? "press"
                                      : press.trigger ? "right trigger" : "left trigger",
                      press.at, press.held, press.bit);
         });
-        g_scriptTriggers[0] = g_scriptTriggers[1] = 0;
-        for (int i = 0; i < 4; i++) { g_scriptAxes[i] = 0; g_scriptAxisHeld[i] = false; }
-        if (g_script.empty()) return 0;
+        g_scriptTriggers[user][0] = g_scriptTriggers[user][1] = 0;
+        for (int i = 0; i < 4; i++) { g_scriptAxes[user][i] = 0; g_scriptAxisHeld[user][i] = false; }
+        if (!g_scripted[user]) return 0;
 
         // A press lasts long enough for a title polling at 60 Hz to see it and
         // short enough not to repeat, unless the entry asked to hold it.
@@ -233,23 +247,23 @@ namespace
         uint16_t buttons = 0;
         for (const Press& press : g_script)
         {
-            if (now < press.at || now >= press.at + press.held) continue;
+            if (press.user != user || now < press.at || now >= press.at + press.held) continue;
             if (press.axis >= 0)
             {
-                g_scriptAxes[press.axis] = press.value;
-                g_scriptAxisHeld[press.axis] = true;
+                g_scriptAxes[user][press.axis] = press.value;
+                g_scriptAxisHeld[user][press.axis] = true;
             }
             else if (press.trigger < 0) buttons |= press.bit;
-            else                        g_scriptTriggers[press.trigger] = 255;
+            else                        g_scriptTriggers[user][press.trigger] = 255;
         }
         return buttons;
     }
 
     // A scripted stick entry moves nothing on its own, so a run with no pad
     // attached still has to take the path that applies it.
-    bool ScriptedAxesHeld()
+    bool ScriptedAxesHeld(uint32_t user)
     {
-        for (bool held : g_scriptAxisHeld) if (held) return true;
+        for (bool held : g_scriptAxisHeld[user]) if (held) return true;
         return false;
     }
 
@@ -331,10 +345,12 @@ PPC_FUNC(__imp__XamInputGetState)
 #endif
 
 #ifdef MW2_USE_SDL
+    if (user >= 4) { *out = XInputState{}; ctx.r3.u64 = X_ERROR_DEVICE_NOT_CONNECTED; return; }
     SDL_Gamepad* pad = PadFor(user);
-    const uint16_t elsewhere = user == 0 ? uint16_t(KeyboardButtons() | ScriptedButtons()) : 0;
-    if (pad || elsewhere || (user == 0 && (ScriptedAxesHeld() || player::Wanted())))
+    const uint16_t elsewhere = uint16_t((user == 0 ? KeyboardButtons() : 0) | ScriptedButtons(user));
+    if (pad || elsewhere || (user ? g_scripted[user] : ScriptedAxesHeld(0) || player::Wanted()))
     {
+
         if (pad) SDL_UpdateGamepads();
         uint16_t b = elsewhere;
         auto down = [&](SDL_GamepadButton x){ return pad && SDL_GetGamepadButton(pad, x); };
@@ -375,9 +391,9 @@ PPC_FUNC(__imp__XamInputGetState)
         auto axis = [&](SDL_GamepadAxis a){ return pad ? SDL_GetGamepadAxis(pad, a) : int16_t(0); };
         uint8_t triggers[2] = {
             uint8_t(std::max<int>(axis(SDL_GAMEPAD_AXIS_LEFT_TRIGGER) >> 7,
-                                  g_scriptTriggers[0])),
+                                  g_scriptTriggers[user][0])),
             uint8_t(std::max<int>(axis(SDL_GAMEPAD_AXIS_RIGHT_TRIGGER) >> 7,
-                                  g_scriptTriggers[1])) };
+                                  g_scriptTriggers[user][1])) };
         // The guest's Y axes point up; SDL's point down.
         int16_t axes[4] = { axis(SDL_GAMEPAD_AXIS_LEFTX),
                             int16_t(-1 - axis(SDL_GAMEPAD_AXIS_LEFTY)),
@@ -401,9 +417,24 @@ PPC_FUNC(__imp__XamInputGetState)
         }
         // A scripted stick entry overrides the pad and the autopilot while it is
         // held: a script that says where to look means it.
-        for (int i = 0; i < 4; i++) if (g_scriptAxisHeld[i]) axes[i] = g_scriptAxes[i];
+        for (int i = 0; i < 4; i++) if (g_scriptAxisHeld[user][i]) axes[i] = g_scriptAxes[user][i];
 
-        Latch& latch = g_latch[user & 3];
+        // The sign-in screen takes the controllers while it is open, the left
+        // stick moving through it as the d-pad does.
+        // The Guide button opens it, or Back and Start together where the
+        // system keeps that button for itself.
+        const uint16_t stick = axes[1] > 16000 ? BTN_DPAD_UP : axes[1] < -16000 ? BTN_DPAD_DOWN : uint16_t(0);
+        const bool guide = down(SDL_GAMEPAD_BUTTON_GUIDE) || (b & (BTN_BACK | BTN_START)) == (BTN_BACK | BTN_START);
+        const bool taken = signin::Input(user, uint16_t(b | stick | (guide ? signin::kGuide : 0)));
+        b &= uint16_t(~signin::kGuide);
+        if (taken)
+        {
+            b = 0;
+            triggers[0] = triggers[1] = 0;
+            axes[0] = axes[1] = axes[2] = axes[3] = 0;
+        }
+
+        Latch& latch = g_latch[user];
         const bool changed = latch.buttons != b ||
                              std::memcmp(latch.triggers, triggers, sizeof triggers) != 0 ||
                              std::memcmp(latch.axes, axes, sizeof axes) != 0;
@@ -457,7 +488,7 @@ PPC_FUNC(__imp__XamInputGetCapabilities)
     return;
 #endif
 #ifdef MW2_USE_SDL
-    if (PadFor(user))
+    if (PadFor(user) || (user < 4 && g_scripted[user]) || (user == 0 && player::Wanted()))
     {
         // What a wired 360 pad reports: every control it has at full range,
         // and both motors.

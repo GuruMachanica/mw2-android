@@ -4,9 +4,15 @@
 #include "kernel.h"
 #include "../guest.h"
 #include "../log.h"
+#include "../crash.h"
+#include "../install/install.h"
 
+#include <algorithm>
+#include <cctype>
 #include <chrono>
 #include <cstdlib>
+#include <cstring>
+#include <string>
 #include <thread>
 
 uint64_t kernel::SystemTime100ns()
@@ -86,9 +92,50 @@ PPC_FUNC(__imp__KeDelayExecutionThread)
     ctx.r3.u64 = X_STATUS_SUCCESS;
 }
 
-// No launch data: the title was started directly, not from the dash.
-PPC_FUNC(__imp__XamLoaderGetLaunchData) { ctx.r3.u64 = X_ERROR_NOT_FOUND; }
-PPC_FUNC(__imp__XamLoaderSetLaunchData) { ctx.r3.u64 = X_ERROR_SUCCESS; }
+// The campaign and the multiplayer are two executables, and the title goes
+// from one to the other by asking the loader for it. What it wants the other
+// to know -- which menu to open, who was signed in -- it leaves as launch
+// data first, and reads back at its own start (runtime/install/).
+// (buffer, size)
+PPC_FUNC(__imp__XamLoaderGetLaunchData)
+{
+    const auto& data = install::LaunchData();
+    if (data.empty()) { ctx.r3.u64 = X_ERROR_NOT_FOUND; return; }
+    std::memcpy(GuestPtr<uint8_t>(ctx.r3.u32), data.data(), std::min<size_t>(data.size(), ctx.r4.u32));
+    ctx.r3.u64 = X_ERROR_SUCCESS;
+}
+// (data, size)
+PPC_FUNC(__imp__XamLoaderSetLaunchData)
+{
+    const auto* data = GuestPtr<const uint8_t>(ctx.r3.u32);
+    install::LaunchData().assign(data, data + ctx.r4.u32);
+    ctx.r3.u64 = X_ERROR_SUCCESS;
+}
+
+namespace
+{
+    // Neither call returns on the console: the title is gone when it would.
+    [[noreturn]] void EndTitle(const char* why)
+    {
+        crash::RequestExit(why);
+        for (;;) std::this_thread::sleep_for(std::chrono::seconds(1));
+    }
+}
+// (path, flags). No path is the way back to the dashboard.
+PPC_FUNC(__imp__XamLoaderLaunchTitle)
+{
+    if (const char* path = GuestPtr<const char>(ctx.r3.u32))
+    {
+        std::string name = path;
+        if (const size_t slash = name.find_last_of("\\/:"); slash != std::string::npos) name.erase(0, slash + 1);
+        for (char& c : name) c = char(std::tolower(uint8_t(c)));
+        LOGI("XamLoaderLaunchTitle: %s (flags %X)", path, ctx.r4.u32);
+        install::SetNextTitle(name);
+        EndTitle("the title started its other executable");
+    }
+    EndTitle("the title left for the dashboard");
+}
+PPC_FUNC(__imp__XamLoaderTerminateTitle) { EndTitle("the title ended itself"); }
 
 // Below every version the multiplayer tests for. What a newer one turns on is
 // XSessionMigrateHost and XSessionModifySkill, which only its Live parties use

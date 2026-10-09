@@ -620,6 +620,13 @@ namespace
         case PM4_XE_SWAP:
             // The swap packet VdSwap writes into the present segment: the end of
             // a frame as the command processor meets it.
+            // Its dwords: a signature, the front buffer, its width and height.
+            if (count >= 2)
+            {
+                s.Next();
+                const uint32_t frontBuffer = s.Next();
+                if (Rendering()) vk::renderer::Swap(frontBuffer);
+            }
             g.swapsParsed++;
             pacing::Note(pacing::kSwap);
             NoteFrameCost();

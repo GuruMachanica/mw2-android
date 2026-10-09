@@ -75,7 +75,10 @@ def main():
     src, dst = ("mp", "sp") if reverse else ("sp", "mp")
     if table:
         text = open(os.path.join(ROOT, "runtime/title.h")).read()
-        mp, sp = re.search(r"#ifdef MW2_TITLE_MP(.*?)#else(.*?)#endif", text, re.S).groups()
+        # The table's blocks, in its order: the update's multiplayer and
+        # campaign, then the disc's.
+        blocks = re.split(r"^#(?:if|elif|else|endif)\b.*$", text, flags=re.M)[1:5]
+        mp, sp = blocks[:2] if title.VERSION == "tu6" else blocks[2:]
         block = mp if reverse else sp
         addresses = [(n, int(a, 16)) for n, a in re.findall(r"#define (T_\w+)\s+([0-9A-F]{8})\b", block)]
     else:
