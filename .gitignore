@@ -5,6 +5,7 @@
 # whole app once -- it built, installed, and died on a manifest pointing at
 # classes that were never committed. Anchor anything meant for the root.
 /mw2/
+/mw2-iso/
 *.xex
 *.xexp
 *.pe
