@@ -11,6 +11,7 @@
 #include "guest.h"
 #include "log.h"
 #include "player.h"
+#include "console.h"
 
 #if MW2_DIAGNOSTICS
 
@@ -33,7 +34,8 @@ namespace
     // A place on a route, and what was done there: nothing, d-pad left, or the
     // right trigger, aimed at `yaw` and `pitch`.
     enum class Act { Walk, Left, Fire };
-    struct Point { float x = 0, y = 0; Act act = Act::Walk; float yaw = 0, pitch = 0; };
+    struct Point { float x = 0, y = 0; Act act = Act::Walk; float yaw = 0, pitch = 0;
+                   bool view = false; };   // a walked point that says where the player looked
     using Route = std::vector<Point>;
 
     float ReadFloat(uint32_t address)
@@ -66,7 +68,12 @@ namespace
                 p.act = word[0] == 'l' ? Act::Left : Act::Fire;
                 out.push_back(p);
             }
-            else if (std::sscanf(line, "%f %f", &p.x, &p.y) == 2) out.push_back(p);
+            else if (int n = std::sscanf(line, "%f %f %f %f %f", &p.x, &p.y, &z, &p.yaw, &p.pitch);
+                     n >= 2)
+            {
+                p.view = n == 5;
+                out.push_back(p);
+            }
         }
         std::fclose(f);
         LOGI("player: route of %zu points read from %s", out.size(), path.c_str());
@@ -196,6 +203,7 @@ namespace
         Clock::time_point actAt, aimedAt, pressAt;
 
         bool everLocated = false, arrived = false, pausing = false;
+        Point joinedFrom;                       // where the player stood when the route was chosen
         Clock::time_point pauseUntil, lastLog;
         float closest = 1e30f;
         player::Where last;
@@ -248,6 +256,7 @@ namespace
             else { g.goal.facing = true; g.goal.yaw = g.via.back().yaw; }
         }
         g.routeChosen = true;
+        g.joinedFrom = { x, y };
         g.leg = 0;
         StartLeg(Clock::now());
         LOGI("player: at %.1f %.1f -- route %zu of %zu, joining at point %zu (%.0f units away),"
@@ -405,7 +414,17 @@ namespace
         // A corner is there to get the route round a building, and leaving one
         // early because the target is nearer in a straight line walks into the
         // building the corner was named for.
-        if (reach >= 140.0f && now - g.legAt <= std::chrono::seconds(90)) return corner;
+        // MW2_WALK_REACH=<units>: how near counts. A route recorded with points
+        // closer together than this is cut short at every turn. A point with
+        // its view is walked straight at, so it can be held to closely.
+        static const float given = float(env::Real("MW2_WALK_REACH"));
+        const float near = given > 0.0f ? given : corner.view ? 24.0f : 140.0f;
+        // Gone by counts as well: a point missed by more than that is behind,
+        // and turning back for it circles it.
+        const Point from = g.leg > 0 ? g.via[g.leg - 1] : g.joinedFrom;
+        const bool passed = (here.x - corner.x) * (corner.x - from.x) +
+                            (here.y - corner.y) * (corner.y - from.y) > 0.0f;
+        if (reach >= near && !passed && now - g.legAt <= std::chrono::seconds(90)) return corner;
 
         LOGI("player: leaving corner %zu at %.1f %.1f, %.0f units from it", g.leg, here.x,
              here.y, reach);
@@ -563,8 +582,97 @@ void player::SawPad(uint16_t buttons, uint8_t rightTrigger)
     std::fflush(g_record);
 }
 
+// A flight: where the camera was and when, twenty times a second, and the
+// replay puts it back there with the title's own setviewpos every few
+// milliseconds -- through the air and through walls, which no pad can be made
+// to do, and to the same places at the same moments every run. Only where the
+// title takes setviewpos, which the multiplayer one does not.
+namespace
+{
+    struct Moment { double t; player::Where at; };
+
+    // The seconds count from the first poll that finds a player, in the
+    // recording and in the replay alike.
+    void RecordFlight(const char* path)
+    {
+        std::FILE* f = std::fopen(path, "w");
+        if (!f) { LOGE("player: cannot write the flight to %s", path); return; }
+        std::fprintf(f, "# seconds x y z yaw pitch -- recorded flight, replay with MW2_FLY_PATH\n");
+        LOGI("player: recording the flight to %s", path);
+        std::thread([f] {
+            Clock::time_point from{};
+            for (;;)
+            {
+                std::this_thread::sleep_for(std::chrono::milliseconds(50));
+                player::Where here;
+                if (!player::Locate(here)) continue;
+                const auto now = Clock::now();
+                if (from.time_since_epoch().count() == 0) from = now;
+                std::fprintf(f, "%.3f %.1f %.1f %.1f %.2f %.2f\n",
+                             std::chrono::duration<double>(now - from).count(), here.x, here.y,
+                             here.z, here.yaw, here.pitch);
+                std::fflush(f);
+            }
+        }).detach();
+    }
+
+    float Between(float a, float b, float part) { return a + (b - a) * part; }
+    // Angles the short way round, so 350 to 10 passes through 0.
+    float Turned(float a, float b, float part) { return a + ShortestTurn(b, a) * part; }
+
+    void Fly(const char* path)
+    {
+        std::vector<Moment> flight;
+        if (std::FILE* f = std::fopen(path, "r"))
+        {
+            char line[256];
+            Moment m;
+            while (std::fgets(line, sizeof line, f))
+                if (std::sscanf(line, "%lf %f %f %f %f %f", &m.t, &m.at.x, &m.at.y, &m.at.z,
+                                &m.at.yaw, &m.at.pitch) == 6)
+                    flight.push_back(m);
+            std::fclose(f);
+        }
+        if (flight.size() < 2) { LOGW("player: no flight to replay in %s", path); return; }
+        LOGI("player: flight of %zu moments over %.1f s read from %s", flight.size(),
+             flight.back().t, path);
+        std::thread([flight = std::move(flight)] {
+            player::Where here;
+            while (!player::Locate(here)) std::this_thread::sleep_for(std::chrono::milliseconds(5));
+            const auto from = Clock::now();
+            LOGI("player: the flight starts");
+            size_t i = 0;
+            for (;;)
+            {
+                const double t = std::chrono::duration<double>(Clock::now() - from).count();
+                if (t >= flight.back().t) break;
+                while (flight[i + 1].t <= t) i++;
+                const Moment& a = flight[i];
+                const Moment& b = flight[i + 1];
+                const float part = float((t - a.t) / (b.t - a.t));
+                char text[160];
+                std::snprintf(text, sizeof text, "setviewpos %.1f %.1f %.1f %.2f %.2f",
+                              Between(a.at.x, b.at.x, part), Between(a.at.y, b.at.y, part),
+                              // The title's teleport lifts whoever it moves by one unit.
+                              Between(a.at.z, b.at.z, part) - 1.0f, Turned(a.at.yaw, b.at.yaw, part),
+                              Turned(a.at.pitch, b.at.pitch, part));
+                console::Place(text);
+                std::this_thread::sleep_for(std::chrono::milliseconds(4));
+            }
+            if (player::Locate(here))
+                LOGI("player: the flight is over, at %.1f %.1f %.1f yaw %.1f pitch %.1f; it was"
+                     " recorded ending at %.1f %.1f %.1f yaw %.1f pitch %.1f", here.x, here.y,
+                     here.z, here.yaw, here.pitch, flight.back().at.x, flight.back().at.y,
+                     flight.back().at.z, flight.back().at.yaw, flight.back().at.pitch);
+            g.arrived = true;
+        }).detach();
+    }
+}
+
 void player::Record()
 {
+    if (const char* flight = env::Text("MW2_RECORD_FLIGHT")) RecordFlight(flight);
+    if (const char* flight = env::Text("MW2_FLY_PATH")) Fly(flight);
     const char* path = env::Text("MW2_RECORD_PATH");
     if (!path) return;
     const float spacing = float(env::Real("MW2_RECORD_SPACING", 110.0));
@@ -616,7 +724,11 @@ bool player::Locate(Where& out)
     // a match and the answer still comes out right, because a client with one
     // local player is slot zero and zero is where the array starts -- so the
     // indirection is not worth reproducing.
+#ifdef T_CLIENT_STATES_ARE_HERE
+    const uint32_t client = T_DATA_ClientStates;
+#else
     const uint32_t client = ReadWord(T_DATA_ClientStates);
+#endif
     if (!client) return false;
     // The same field viewpos checks before printing: zero until there is a player.
     if (!ReadWord(client + T_CLIENT_VALID)) return false;
@@ -718,6 +830,19 @@ bool player::Steer(short axes[4], Press& press)
         axes[1] = std::min<short>(axes[1], 12000);
     axes[0] = 0;
     axes[3] = 0;
+    // A point recorded with its view: look where the player looked and move
+    // straight at the point with the left stick, whichever way that is from
+    // the view. Turning to face each point instead swings wide of it, and the
+    // walk then meets what the player went round. Not while going round
+    // something itself, which steers by turning.
+    if (to.view && !backing && g.escapeUntil <= now)
+    {
+        const float off = ShortestTurn(std::atan2(dy, dx) * 57.2957795f, here.yaw) / 57.2957795f;
+        axes[0] = short(-32000.0f * std::sin(off));
+        axes[1] = short(32000.0f * std::cos(off));
+        axes[2] = TurnStick(ShortestTurn(to.yaw, here.yaw));
+        axes[3] = PitchStick(ShortestTurn(to.pitch, here.pitch));
+    }
     return true;
 }
 

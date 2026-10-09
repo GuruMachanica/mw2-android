@@ -92,13 +92,14 @@
 #define T_DATA_TimeStampBundlePtr 0x82000780u   // the KeTimeStampBundle import record
 #define T_DATA_DebugMonitorPtr    0x820007F8u   // the KeDebugMonitorData import record
 #define T_DATA_DeviceTable        0x83A53020u   // Memcard's chosen device per controller
-// Not derived for the campaign, which takes `setviewpos` and does not need the
-// autopilot the multiplayer needs. The code reading these checks for zero.
-#define T_DATA_ClientStates       0u
-#define T_CLIENT_STRIDE           0u
-#define T_CLIENT_VALID            0u
-#define T_CLIENT_ORIGIN           0u
-#define T_CLIENT_ANGLES           0u
+// The same from the campaign's `viewpos` (sub_820E1D40), where the states are
+// the array itself and not a pointer to it.
+#define T_DATA_ClientStates       0x8244C2C0u
+#define T_CLIENT_STATES_ARE_HERE  1
+#define T_CLIENT_STRIDE           0x0002F1E4u
+#define T_CLIENT_VALID            32u
+#define T_CLIENT_ORIGIN           133188u       // x, y, z
+#define T_CLIENT_ANGLES           149388u       // pitch, yaw, roll
 
 #elif defined(MW2_TITLE_MP)
 

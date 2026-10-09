@@ -37,6 +37,7 @@ namespace
 
     std::mutex g_lock;
     std::vector<Entry> g_script;
+    std::string g_place;                    // console::Place, the latest only
     bool g_parsed = false;
     std::chrono::steady_clock::time_point g_start;
 
@@ -87,13 +88,20 @@ void console::RunNow(const char* text)
     g_script.push_back(std::move(e));
 }
 
+void console::Place(const char* text)
+{
+    std::lock_guard g(g_lock);
+    g_place = text;
+}
+
 void console::Pump(PPCContext& ctx, uint8_t* base)
 {
     std::string text;
+    bool placing = false;
     {
         std::lock_guard g(g_lock);
         if (!g_parsed) Parse();
-        if (g_script.empty()) return;
+        if (g_script.empty() && g_place.empty()) return;
 
         const double now = Elapsed();
         for (Entry& e : g_script)
@@ -102,6 +110,12 @@ void console::Pump(PPCContext& ctx, uint8_t* base)
             e.done = true;
             text = e.text;
             break;                          // one per pump; they queue anyway
+        }
+        if (text.empty() && !g_place.empty())
+        {
+            text = std::move(g_place);
+            g_place.clear();
+            placing = true;
         }
     }
     if (text.empty()) return;
@@ -123,5 +137,5 @@ void console::Pump(PPCContext& ctx, uint8_t* base)
     GUEST_FUNC(T_Cbuf_AddText)(ctx, base);
     ctx = saved;
 
-    LOGI("console: queued \"%.*s\" at %.2f s", int(text.size()) - 1, text.c_str(), Elapsed());
+    if (!placing) LOGI("console: queued \"%.*s\" at %.2f s", int(text.size()) - 1, text.c_str(), Elapsed());
 }
