@@ -56,6 +56,8 @@ namespace vk::pipeline
     bool     HasExtendedDynamicState();
     // Whether the device runs under the legacy Vulkan 1.1 fallback path (traditional VkRenderPass/VkFramebuffer).
     bool     LegacyMode();
+    // Whether the device supports BC texture compression (BC1..BC5).
+    bool     TextureCompressionBC();
 
     // The device has one queue, and the window thread and the GPU thread both
     // submit to it; Vulkan requires a queue to be externally synchronised.

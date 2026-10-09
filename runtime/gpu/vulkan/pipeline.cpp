@@ -24,6 +24,7 @@ bool     vk::pipeline::PipelineLibraries() { return false; }
 bool     vk::pipeline::HasDynamicRendering() { return false; }
 bool     vk::pipeline::HasExtendedDynamicState() { return false; }
 bool     vk::pipeline::LegacyMode() { return false; }
+bool     vk::pipeline::TextureCompressionBC() { return false; }
 std::mutex& vk::pipeline::QueueMutex() { static std::mutex m; return m; }
 void*    vk::pipeline::SetLayout(uint32_t) { return nullptr; }
 void*    vk::pipeline::Layout() { return nullptr; }
@@ -51,6 +52,7 @@ void vk::pipeline::OnDeviceLost(void (*)(const char*)) {}
 #ifdef MW2_ANDROID
 #include "../../android/android.h"
 #endif
+#include "../../env.h"
 
 #include <vulkan/vulkan.h>
 #include "loader.h"
@@ -83,6 +85,7 @@ namespace
         bool hasDynamicRendering = false;
         bool hasExtendedDynamicState = false;
         bool legacyMode = false;
+        bool textureCompressionBC = false;
         std::string name = "none";
 
         VkDescriptorSetLayout sets[3]{};
@@ -171,6 +174,7 @@ bool vk::pipeline::CreateDevice(void* physicalDevice, uint32_t family,
     // Compressed BC textures (BC1..BC5) used throughout the title. Strict drivers
     // (Mali, etc.) require this feature to be explicitly enabled before creating BC images.
     enabled.textureCompressionBC = supported.textureCompressionBC;
+    g.textureCompressionBC = supported.textureCompressionBC;
     if (!supported.textureCompressionBC)
         LOGW("vulkan: the device does not report textureCompressionBC support");
     // The title's occlusion queries are a sample count it compares against a
@@ -252,9 +256,10 @@ bool vk::pipeline::CreateDevice(void* physicalDevice, uint32_t family,
     const bool hasDynamicState =
         dynamicState.extendedDynamicState && (dynamicStateExtension || core13);
 
-    g.hasDynamicRendering = hasDynamicRendering;
-    g.hasExtendedDynamicState = hasDynamicState;
-    g.legacyMode = !hasDynamicRendering || !hasDynamicState;
+    const bool forceLegacy = env::Flag("MW2_FORCE_LEGACY_RENDERING");
+    g.hasDynamicRendering = hasDynamicRendering && !forceLegacy;
+    g.hasExtendedDynamicState = hasDynamicState && !forceLegacy;
+    g.legacyMode = !hasDynamicRendering || !hasDynamicState || forceLegacy;
 
     LOGI("vulkan: device reports Vulkan %u.%u.%u; dynamic rendering %s (extension %s),"
          " extended dynamic state %s (extension %s)",
@@ -268,7 +273,8 @@ bool vk::pipeline::CreateDevice(void* physicalDevice, uint32_t family,
 
     if (g.legacyMode)
     {
-        LOGI("vulkan: legacy Vulkan 1.1 fallback active: classic VkRenderPass and static pipeline states");
+        LOGI("vulkan: legacy Vulkan 1.1 fallback active: classic VkRenderPass and static pipeline states%s",
+             forceLegacy ? " (forced by MW2_FORCE_LEGACY_RENDERING)" : "");
     }
 
     if (dynamicRenderingExtension) extensions.push_back(VK_KHR_DYNAMIC_RENDERING_EXTENSION_NAME);
@@ -645,6 +651,7 @@ bool     vk::pipeline::PipelineLibraries()
 bool     vk::pipeline::HasDynamicRendering() { return g.hasDynamicRendering; }
 bool     vk::pipeline::HasExtendedDynamicState() { return g.hasExtendedDynamicState; }
 bool     vk::pipeline::LegacyMode() { return g.legacyMode; }
+bool     vk::pipeline::TextureCompressionBC() { return g.textureCompressionBC; }
 std::mutex& vk::pipeline::QueueMutex() { static std::mutex m; return m; }
 void*    vk::pipeline::SetLayout(uint32_t set) { return set < 3 ? g.sets[set] : nullptr; }
 void*    vk::pipeline::Layout() { return g.layout; }
