@@ -165,16 +165,28 @@ class GameActivity : AppCompatActivity(), NativeListener {
     }
 
     private fun getDeviceTemp(): Float {
-        for (i in 0..15) {
-            val file = File("/sys/class/thermal/thermal_zone$i/temp")
-            if (file.exists()) {
+        var fallbackTemp = 0f
+        for (i in 0..19) {
+            val typeFile = File("/sys/class/thermal/thermal_zone$i/type")
+            val tempFile = File("/sys/class/thermal/thermal_zone$i/temp")
+            if (tempFile.exists()) {
                 try {
-                    val raw = file.readText().trim().toLongOrNull() ?: continue
+                    val raw = tempFile.readText().trim().toLongOrNull() ?: continue
                     val c = if (raw > 1000) raw / 1000f else raw.toFloat()
-                    if (c in 20.0f..105.0f) return c
+                    if (c in 20.0f..105.0f) {
+                        val typeName = if (typeFile.exists()) typeFile.readText().trim().lowercase() else ""
+                        if (typeName.contains("cpu") || typeName.contains("soc") ||
+                            typeName.contains("ap") || typeName.contains("tsens") ||
+                            typeName.contains("mtktscpu")) {
+                            return c
+                        }
+                        if (fallbackTemp == 0f) fallbackTemp = c
+                    }
                 } catch (_: Exception) {}
             }
         }
+        if (fallbackTemp > 0f) return fallbackTemp
+
         try {
             val filter = IntentFilter(Intent.ACTION_BATTERY_CHANGED)
             val batteryIntent = registerReceiver(null, filter)
@@ -260,7 +272,7 @@ class GameActivity : AppCompatActivity(), NativeListener {
                         String.format(Locale.US, "%.1f°C%s", battTemp, chg)
                     } else "N/A"
 
-                    val ramStr = if (totalMb > 0) String.format(Locale.US, "%d MB / %d MB", appMb, totalMb)
+                    val ramStr = if (totalMb > 0) String.format(Locale.US, "%d MB (App) / %d MB (Total)", appMb, totalMb)
                                  else if (appMb > 0) "$appMb MB" else "N/A"
                     val cpuTempStr = if (temp > 0f) String.format(Locale.US, "%.0f°C", temp) else "N/A"
 
@@ -271,7 +283,7 @@ class GameActivity : AppCompatActivity(), NativeListener {
 
                         append("CPU & SYSTEM\n")
                         append("  Utilization: $cpuStr (${Runtime.getRuntime().availableProcessors()} Cores)\n")
-                        append("  CPU Temp: $cpuTempStr  ·  Battery: $battStr\n\n")
+                        append("  SoC/Thermal: $cpuTempStr  ·  Battery: $battStr\n\n")
 
                         append("GPU & VULKAN\n")
                         append("  Device: $devName\n")
@@ -279,7 +291,7 @@ class GameActivity : AppCompatActivity(), NativeListener {
                         append("  Textures: $texMb MB  ·  $tcMode\n\n")
 
                         append("MEMORY & VIEWPORT\n")
-                        append("  App / System RAM: $ramStr\n")
+                        append("  App / System Total RAM: $ramStr\n")
                         append("  Internal Render: ${resW}×${resH}  •  Refresh: ${refreshHz().roundToInt()} Hz\n")
                     }
                 }

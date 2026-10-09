@@ -147,7 +147,7 @@ namespace vk::renderer::detail
     void EndPass()
     {
         CloseGuestQuery();
-        if (g.currentColour)
+        if (g.currentColour || g.currentDepth)
             Record([](VkCommandBuffer command) {
                 if (vk::pipeline::LegacyMode())
                     vkCmdEndRenderPass(command);

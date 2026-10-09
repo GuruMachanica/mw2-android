@@ -155,20 +155,24 @@ namespace vk::bc
         for (gpu::TextureData::Level& level : dst.levels)
         {
             const size_t at = (flat.size() + 15) & ~size_t(15);
-            const uint32_t layerDepth = level.layers * (level.depth ? level.depth : 1);
-            const size_t levelSize = size_t(level.width) * level.height * layerDepth * bpp;
+            const uint32_t numSlices = src.volume ? (level.depth ? level.depth : 1) : (level.layers ? level.layers : 1);
+            const size_t levelSize = size_t(level.width) * level.height * numSlices * bpp;
             flat.resize(at + levelSize, 0);
 
-            for (uint32_t layer = 0; layer < layerDepth; layer++)
+            for (uint32_t layer = 0; layer < numSlices; layer++)
             {
-                uint8_t* dstLayer = flat.data() + at + size_t(layer) * level.width * level.height * bpp;
+                const size_t sliceOffset = at + size_t(layer) * level.width * level.height * bpp;
+                uint8_t* dstLayer = flat.data() + sliceOffset;
 
                 for (uint32_t by = 0; by < level.blocksHigh; by++)
                 {
                     for (uint32_t bx = 0; bx < level.blocksWide; bx++)
                     {
                         const size_t blockIdx = (size_t(layer) * level.blocksHigh + by) * level.blocksWide + bx;
-                        const uint8_t* block = src.bytes.data() + level.offset + blockIdx * src.bytesPerBlock;
+                        const size_t blockOffset = level.offset + blockIdx * src.bytesPerBlock;
+                        if (blockOffset + src.bytesPerBlock > src.bytes.size()) continue;
+
+                        const uint8_t* block = src.bytes.data() + blockOffset;
 
                         if (xenosFormat == 18 || xenosFormat == 51) // BC1
                         {
@@ -180,7 +184,8 @@ namespace vk::bc
                                 const uint32_t y = (by << 2) + (i >> 2);
                                 if (x >= level.width || y >= level.height) continue;
                                 const size_t pixelOffset = (y * level.width + x) * 4;
-                                std::memcpy(dstLayer + pixelOffset, rgba[i], 4);
+                                if (sliceOffset + pixelOffset + 4 <= flat.size())
+                                    std::memcpy(dstLayer + pixelOffset, rgba[i], 4);
                             }
                         }
                         else if (xenosFormat == 19 || xenosFormat == 52) // BC2
@@ -195,7 +200,8 @@ namespace vk::bc
                                 const uint32_t y = (by << 2) + (i >> 2);
                                 if (x >= level.width || y >= level.height) continue;
                                 const size_t pixelOffset = (y * level.width + x) * 4;
-                                std::memcpy(dstLayer + pixelOffset, rgba[i], 4);
+                                if (sliceOffset + pixelOffset + 4 <= flat.size())
+                                    std::memcpy(dstLayer + pixelOffset, rgba[i], 4);
                             }
                         }
                         else if (xenosFormat == 20 || xenosFormat == 53) // BC3
@@ -211,7 +217,8 @@ namespace vk::bc
                                 const uint32_t y = (by << 2) + (i >> 2);
                                 if (x >= level.width || y >= level.height) continue;
                                 const size_t pixelOffset = (y * level.width + x) * 4;
-                                std::memcpy(dstLayer + pixelOffset, rgba[i], 4);
+                                if (sliceOffset + pixelOffset + 4 <= flat.size())
+                                    std::memcpy(dstLayer + pixelOffset, rgba[i], 4);
                             }
                         }
                         else if (xenosFormat == 59) // BC4 (DXT5A) -> R8
@@ -224,7 +231,8 @@ namespace vk::bc
                                 const uint32_t y = (by << 2) + (i >> 2);
                                 if (x >= level.width || y >= level.height) continue;
                                 const size_t pixelOffset = y * level.width + x;
-                                dstLayer[pixelOffset] = r[i];
+                                if (sliceOffset + pixelOffset + 1 <= flat.size())
+                                    dstLayer[pixelOffset] = r[i];
                             }
                         }
                         else if (xenosFormat == 49) // BC5 (DXN) -> RG8
@@ -239,8 +247,11 @@ namespace vk::bc
                                 const uint32_t y = (by << 2) + (i >> 2);
                                 if (x >= level.width || y >= level.height) continue;
                                 const size_t pixelOffset = (y * level.width + x) * 2;
-                                dstLayer[pixelOffset + 0] = r[i];
-                                dstLayer[pixelOffset + 1] = g[i];
+                                if (sliceOffset + pixelOffset + 2 <= flat.size())
+                                {
+                                    dstLayer[pixelOffset + 0] = r[i];
+                                    dstLayer[pixelOffset + 1] = g[i];
+                                }
                             }
                         }
                     }
@@ -251,6 +262,8 @@ namespace vk::bc
             level.size = levelSize;
             level.blocksWide = level.width;
             level.blocksHigh = level.height;
+            level.depth = src.volume ? numSlices : 1;
+            level.layers = src.volume ? numSlices : src.layers;
         }
 
         dst.bytes = std::move(flat);

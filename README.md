@@ -2,7 +2,7 @@
 
 [![Android CI](https://github.com/GuruMachanica/mw2-android/actions/workflows/android.yml/badge.svg)](https://github.com/GuruMachanica/mw2-android/actions/workflows/android.yml)
 [![Release](https://img.shields.io/github/v/release/GuruMachanica/mw2-android?color=blue)](https://github.com/GuruMachanica/mw2-android/releases/latest)
-[![License: GPL v3](https://img.shields.io/badge/License-GPLv3-blue.svg)](LICENSE.md)
+[![License: GPL v3](https://img.shields.io/badge/License-GPLv3-blue.svg)](LICENSE)
 
 *Call of Duty: Modern Warfare 2 (2009)* for the Xbox 360, recompiled ahead-of-time into native machine code for **Android (ARM64)**, **Linux**, and **Windows (x86-64)**.
 
@@ -29,6 +29,9 @@ This is **not an emulator**: Xbox 360 PowerPC machine instructions are translate
   - **MediaTek Dimensity** (Cortex-A78/X-series clusters)
   - **Google Tensor** (Tri-cluster 2+2+4 architecture)
   - **Samsung Exynos** (Mali & AMD RDNA Xclipse GPUs)
+- **Vulkan 1.1 Legacy RenderPass Fallback**: Fully supported classic `VkRenderPass` and static pipeline state path for devices lacking `VK_KHR_dynamic_rendering` or `VK_EXT_extended_dynamic_state` (e.g. Dimensity 920 Mali-G68 MC4).
+- **CPU BC1–BC5 Texture Decompressor**: Built-in fallback decompressor for GPUs without hardware BC/DXT texture decompression support.
+- **Live Performance & Diagnostics HUD**: Interactive in-game overlay displaying real-time FPS, frame time, CPU usage, SoC thermals, app & system RAM, texture memory, and active Vulkan device.
 - **Direct Play & One-Tap Setup**: The launcher automatically discovers game disc images (`.iso` / `.7z` / `.zip`) in `/sdcard/Download/` and sets up everything in one tap.
 - **Customizable Touch Pad**: Virtual on-screen touch controls with customizable layout, opacity, button toggle modes (sticky ADS), and velocity-based look gestures.
 - **Persistent Pipeline & Shader Cache**: Compiled Vulkan pipelines are cached persistently to storage (`pipeline.vkcache`) and auto-flushed on pause/memory trim, eliminating shader compilation stutter on repeated runs.
@@ -44,9 +47,11 @@ This is **not an emulator**: Xbox 360 PowerPC machine instructions are translate
 - **Architecture**: 64-bit ARM (`arm64-v8a`). 32-bit devices are not supported.
 - **OS**: Android 10 or later (API level 29+).
 - **GPU / Vulkan**:
-  - Requires **Vulkan 1.3** or **Vulkan 1.1+ with `VK_KHR_dynamic_rendering` and `VK_EXT_extended_dynamic_state`**.
-  - *Compatible Devices*: Qualcomm Snapdragon 865 and newer (Turnip or stock V26+), Google Tensor G1/G2/G3/G4, Samsung Exynos 2200/2400 (Xclipse), MediaTek Dimensity 8000/9000-series.
-  - *Note for Vulkan 1.1 devices*: Devices whose stock vendor driver reports only Vulkan 1.1 without dynamic rendering (such as Dimensity 920 Mali-G68) will display a renderer compatibility notice.
+  - **Vulkan 1.3** or **Vulkan 1.1+**.
+  - Modern path: Vulkan 1.3 with dynamic rendering & extended dynamic state.
+  - Legacy path: Automatic Vulkan 1.1 `VkRenderPass` fallback for Mali / older vendor drivers.
+  - BC Texture decompression: Automatic hardware BC if supported, or CPU fallback decoding on GPUs lacking BC compression.
+  - *Compatible Devices*: Qualcomm Snapdragon 865 and newer (Turnip or stock V26+), Google Tensor G1–G4, Samsung Exynos 2200/2400 (Xclipse), MediaTek Dimensity 920/1200/8000/9000-series.
 - **Storage**: ~7-8 GB free internal storage for game assets.
 - **Game Media**: An ISO or disc dump of *Call of Duty: Modern Warfare 2* (Xbox 360, version 1.0.557, USA or Europe).
 

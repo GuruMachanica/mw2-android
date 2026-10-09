@@ -328,8 +328,11 @@ namespace vk::renderer::detail
             info.layerCount = 1;
             info.pDepthAttachment = &depth;
             info.pStencilAttachment = &depth;
-            dispatch.beginRendering(command, &info);
-            dispatch.endRendering(command);
+            if (dispatch.beginRendering && dispatch.endRendering)
+            {
+                dispatch.beginRendering(command, &info);
+                dispatch.endRendering(command);
+            }
 
             // A resolve writes at the colour output stage whatever it
             // resolves; the copy after it reads the twin.
@@ -522,7 +525,9 @@ namespace vk::renderer::detail
         VkFramebuffer legacyFb = VK_NULL_HANDLE;
         if (legacy)
         {
-            legacyPass = GetRenderPass(colour.format, depth.format, colour.samples);
+            VkSampleCountFlagBits samples = (colour.format != VK_FORMAT_UNDEFINED) ? colour.samples : depth.samples;
+            if (samples == 0) samples = VK_SAMPLE_COUNT_1_BIT;
+            legacyPass = GetRenderPass(colour.format, depth.format, samples);
             legacyFb = GetFramebuffer(legacyPass, colourView, depthView, area.width, area.height);
         }
         Record([=](VkCommandBuffer command) {
