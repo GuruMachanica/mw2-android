@@ -1,120 +1,171 @@
-# Modern Warfare 2, recompiled
+# Modern Warfare 2 — Android & PC Port
 
-Call of Duty: Modern Warfare 2 (2009) for the Xbox 360, running natively on PC.
-Not an emulator: the game's executables are recompiled ahead of time. No game
-files are included; you need your own disc.
+[![Android CI](https://github.com/GuruMachanica/mw2-android/actions/workflows/android.yml/badge.svg)](https://github.com/GuruMachanica/mw2-android/actions/workflows/android.yml)
+[![Release](https://img.shields.io/github/v/release/GuruMachanica/mw2-android?color=blue)](https://github.com/GuruMachanica/mw2-android/releases/latest)
+[![License: GPL v3](https://img.shields.io/badge/License-GPLv3-blue.svg)](LICENSE.md)
 
-![The multiplayer menu, running in a window](docs/images/multiplayer-menu.png)
+*Call of Duty: Modern Warfare 2 (2009)* for the Xbox 360, recompiled ahead-of-time into native machine code for **Android (ARM64)**, **Linux**, and **Windows (x86-64)**.
 
-**[Download the latest release](../../releases/latest)**
+This is **not an emulator**: Xbox 360 PowerPC machine instructions are translated ahead-of-time into native C++ via [XenonRecomp](https://github.com/hedge-dev/XenonRecomp) and compiled directly into native binaries. The game executes directly on host hardware with full platform integration.
 
-## Features
+> **Important**: No copyrighted game assets, executables, or code are included in this repository. You must provide your own legally obtained Xbox 360 game disc image (`Call of Duty: Modern Warfare 2`, version 1.0.557).
 
-- Campaign and multiplayer
-- Private matches and system link, online with friends:
-  - **Steam** build: invite friends through Steam, no port to open
-  - **LAN** build: for players without Steam, on the same network
-- 60 fps, native MSAA, any window size or fullscreen, drawn at 720p, 1440p or 4K
-- Xbox 360-style controller, with rumble
+---
 
-Not supported: public matchmaking and ranked playlists (they needed
-Activision's servers). Special Ops is untested.
+## Highlights & Features
+
+### General Features
+- **Full Campaign & Multiplayer**: Play the single-player campaign or multiplayer matches offline and online.
+- **LAN & Steam Networking**:
+  - **Steam Build**: Invite friends directly via Steam friends list without port forwarding.
+  - **LAN / Direct IP Build**: Local system link matches for offline or private networks.
+- **Modern Graphics Pipeline**: Native Vulkan renderer targeting 720p, 1080p, 1440p, or 4K with native MSAA.
+- **Full Gamepad Support**: Xbox, PlayStation, and generic Bluetooth/USB controllers with haptic rumble.
+
+### Android-Specific Features
+- **Native Android Runtime**: Built from source as a standalone APK (`com.mw2.recomp.sp` and `com.mw2.recomp.mp`) using the Android NDK (r28+) and modern Kotlin.
+- **Universal Multi-SoC Optimization**: Dynamic scheduler thread-pinning and CPU core affinity tuned for:
+  - **Qualcomm Snapdragon** (Prime + Gold performance cores)
+  - **MediaTek Dimensity** (Cortex-A78/X-series clusters)
+  - **Google Tensor** (Tri-cluster 2+2+4 architecture)
+  - **Samsung Exynos** (Mali & AMD RDNA Xclipse GPUs)
+- **Direct Play & One-Tap Setup**: The launcher automatically discovers game disc images (`.iso` / `.7z` / `.zip`) in `/sdcard/Download/` and sets up everything in one tap.
+- **Customizable Touch Pad**: Virtual on-screen touch controls with customizable layout, opacity, button toggle modes (sticky ADS), and velocity-based look gestures.
+- **Persistent Pipeline & Shader Cache**: Compiled Vulkan pipelines are cached persistently to storage (`pipeline.vkcache`) and auto-flushed on pause/memory trim, eliminating shader compilation stutter on repeated runs.
+- **Custom Driver Loader**: Sideload and switch to custom Mesa **Turnip** Vulkan drivers for Adreno hardware on the fly via `libadrenotools`.
+- **Low-Latency 3D Audio**: AAudio backend with automatic downmixing from Xbox 360 5.1 surround sound to high-fidelity stereo.
+- **Modern OS Support**: Full 16 KB memory page compatibility for Android 14 and Android 15.
+
+---
 
 ## Requirements
 
-- An ISO of the Xbox 360 disc, version 1.0.557 (USA/Europe). The launcher checks it and installs required files.
-- Linux or Windows, 64-bit; or Android 10 and later on a 64-bit phone (arm64-v8a) ([docs/android.md](docs/android.md))
-- A Vulkan 1.2+ GPU (PC) / Vulkan 1.3 GPU (Android: MediaTek Dimensity/Mali, Google Tensor, Samsung Exynos/Xclipse, Qualcomm Snapdragon/Adreno)
-- 6-8 GB of free storage space
-- A controller (the keyboard covers the menus; Android has a fully customizable on-screen touch pad)
+### Android
+- **Architecture**: 64-bit ARM (`arm64-v8a`). 32-bit devices are not supported.
+- **OS**: Android 10 or later (API level 29+).
+- **GPU / Vulkan**:
+  - Requires **Vulkan 1.3** or **Vulkan 1.1+ with `VK_KHR_dynamic_rendering` and `VK_EXT_extended_dynamic_state`**.
+  - *Compatible Devices*: Qualcomm Snapdragon 865 and newer (Turnip or stock V26+), Google Tensor G1/G2/G3/G4, Samsung Exynos 2200/2400 (Xclipse), MediaTek Dimensity 8000/9000-series.
+  - *Note for Vulkan 1.1 devices*: Devices whose stock vendor driver reports only Vulkan 1.1 without dynamic rendering (such as Dimensity 920 Mali-G68) will display a renderer compatibility notice.
+- **Storage**: ~7-8 GB free internal storage for game assets.
+- **Game Media**: An ISO or disc dump of *Call of Duty: Modern Warfare 2* (Xbox 360, version 1.0.557, USA or Europe).
 
-## Install
+### PC (Windows & Linux)
+- 64-bit Windows 10/11 or modern x86-64 Linux distribution.
+- Vulkan 1.2+ capable GPU (AMD, NVIDIA, or Intel).
+- Xbox 360 game disc image (v1.0.557).
 
-1. Download `steam` or `lan` for your system from the
-   [releases](../../releases/latest), and extract it anywhere.
-2. Start `mw2-launcher` and choose INSTALL GAME. It asks for your ISO, copies
-   the game files into `game/` beside it and applies title update 6.
-3. PLAY CAMPAIGN and PLAY MULTIPLAYER start the game; so do `mw2-sp` and
-   `mw2-mp` directly.
+---
 
-From a terminal: `./mw2-launcher --install path/to/game.iso` (an extracted
-disc folder works too). If the update can't be downloaded, the launcher says
-where to get it and takes the file (`--update <file>`).
+## Installation & Setup
 
-The launcher also has PROFILE (set the multiplayer rank and prestige, unlock
-everything, open the campaign's and Special Ops' missions), RESOLUTION (the
-size the game draws at: 720p as on the console, 1440p or 4K, which need a
-faster graphics card) and CHECK FOR UPDATES, which installs a newer release
-over this one.
+### Android Setup
 
-Something wrong? REPORT A BUG runs the game once with its log kept, then
-writes a report file and opens a new issue with your system's description
-filled in. Describe what happened, drag the file in, and submit.
+1. **Install the APK**:
+   Download the latest `app-campaign-release.apk` (or `app-multiplayer-release.apk`) from [Releases](../../releases/latest) and install it on your device.
+2. **Provide Game Files**:
+   Copy your game disc image (`mw2.iso` or `Call of Duty - Modern Warfare 2 (USA, Europe).iso`) into your phone's `Download` folder.
+3. **Launch & Play**:
+   - Open **MW2 Campaign**.
+   - If a disc image is detected in `Download`, tap **⚡ INSTALL & PLAY**. The installer will unpack and verify the game files into your app storage.
+   - Once installation completes, tap **▶ LAUNCH GAME** to start playing.
+   - Enable **Direct Launch** to automatically bypass the launcher and jump straight into gameplay on future launches.
 
-Saves go in `saves/` beside the executables.
+### PC Setup
 
-## Android
+1. Download the `steam` or `lan` release archive from [Releases](../../releases/latest) and extract it anywhere.
+2. Run `mw2-launcher` and select **INSTALL GAME**, pointing it to your game ISO.
+3. Choose **PLAY CAMPAIGN** or **PLAY MULTIPLAYER**.
 
-`android/` is a full native port: the same runtime, native ARM64 execution, a Vulkan surface from the
-activity, AAudio, and an on-screen pad every part of which can be moved,
-resized, hidden or made to stay down when tapped. Physical controllers work
-and can be switched off entirely.
+---
 
-- **Universal SoC Support**: Tuned for MediaTek (Dimensity / Mali), Google Tensor, Samsung Exynos (Mali & AMD RDNA Xclipse), and Qualcomm Snapdragon (Turnip or system drivers).
-- **Direct Play & One-Tap Setup**: Automatically detects game disc images in `Downloads` for one-tap install, and supports direct game launching on startup.
-- **Android 10+ Compatible**: Fully patched for Android 10 scoped storage and Android 14/15 16 KB page sizes.
+## Controls & Keybindings
 
-Building it means generating the recompiled sources on desktop and building via Gradle: see [docs/android.md](docs/android.md).
+### Android Touch Controls
 
-## Play
+- **Left Stick**: Movement (walk/run).
+- **Right Area**: Fluid touch-drag camera look (velocity-based look curve).
+- **Action Buttons**: Jump, Crouch/Prone, Reload, Swap Weapon, Frag Grenade, Flashbang, Melee.
+- **ADS Toggle**: Tap the Aim button to aim down sights; can be configured as tap-to-toggle or hold-to-aim.
+- **Customize Layout**: Open pause menu → **Edit controls** to drag, resize, or adjust transparency of any button.
+- **Physical Gamepad**: Bluetooth or USB Xbox/PlayStation controllers are automatically detected.
 
-| key | |
-|---|---|
-| `F8` | fullscreen |
-| `F6` | invite friends (Steam) |
-| arrows, `Enter`, `Esc` | d-pad, Start, Back |
-| `Z` `X` `C` `V`, `Q` `E` | A B X Y, bumpers |
+### PC Keybindings
 
-**Online.** Everyone runs `mw2-mp` from the same build.
+| Key | Action |
+| :--- | :--- |
+| `F8` | Toggle Fullscreen |
+| `F6` | Invite Friends (Steam build) |
+| Arrow Keys, `Enter`, `Esc` | D-Pad, Start, Back |
+| `Z`, `X`, `C`, `V` | A, B, X, Y buttons |
+| `Q`, `E` | Left / Right Bumpers |
+| Mouse / Left Click / Right Click | Aim, Fire, Look |
 
-- **Steam**: with Steam running, the game shows as *Spacewar*. Without it, the
-  `steam` download plays as the `lan` one does, with a rank of its own. Host a
-  PLAY ONLINE → PRIVATE MATCH, invite from Steam's friend list (or `F6` if you
-  added `mw2-mp` to Steam as a non-Steam game). The friend accepts while their
-  game is running.
-- **LAN**: SYSTEM LINK finds games on the network by itself. For private
-  matches, the lobby's "Invite friends" invites everyone on the network; start
-  the others with `MW2_LAN_ACCEPT=1`. Your name is your login, or `MW2_NAME=`.
+---
 
-**More players.** The first controller is you. A second, third or fourth
-controller signs in on the game's sign-in screen, which opens where the game
-asks for it (SIGN IN PROFILE in split screen, SYSTEM LINK) or with the Guide
-button (or Back and Start together): choose a profile, which keeps its own
-rank and settings, or make a new one. The launcher's PROFILE screen renames
-them. Two copies of `mw2-mp` on one PC can play a SYSTEM LINK match, each with
-the controller that chose SYSTEM LINK in it.
+## Building from Source
 
-**Settings**: `MW2_FULLSCREEN=1`, `MW2_SCALE=<2 or 3>` (what RESOLUTION
-sets), `MW2_MSAA=<n>` or `MW2_NO_MSAA=1`, `MW2_NO_AUDIO=1`. Set them as
-environment variables, or keep them in a file named `.env` beside the
-executables, one per line.
+### Android APK Build
 
-**Bug reports**: run with `MW2_LOG_FILE=mw2.log` and attach the file.
+#### Prerequisites
+- Desktop environment (Linux or Windows).
+- **JDK 17**.
+- **Android SDK** with **NDK 28.2.13676358** (`platforms;android-35`).
+- CMake 3.22.1+ and Python 3.10+.
 
-## Developers
+```sh
+# 1. Recompile Xbox 360 guest executables to C++
+TITLE=sp ./build.sh
+TITLE=mp ./build.sh
 
-Building, the source layout and how the runtime works:
-[docs/building.md](docs/building.md), [docs/runtime.md](docs/runtime.md),
-[docs/switches.md](docs/switches.md), [docs/android.md](docs/android.md),
-and the rest of [docs/](docs/).
+# 2. (Optional) Fetch libadrenotools for custom Adreno GPU driver support
+./android/fetch_deps.sh
+
+# 3. Build the Campaign APK via Gradle
+cd android
+./gradlew assembleCampaignRelease
+
+# The output APK will be in:
+# android/app/build/outputs/apk/campaign/release/app-campaign-release.apk
+```
+
+#### Automated GitHub Actions CI
+The [.github/workflows/android.yml](.github/workflows/android.yml) workflow builds installable APKs directly on GitHub runners:
+1. Go to **Actions** → **android** → **Run workflow**.
+2. Supply a download link to your legal game executables or ISO archive.
+3. The runner recompiles the tree, runs the NDK toolchain with `ccache`, and attaches the signed APK as an artifact.
+
+---
+
+## Troubleshooting & Diagnostics
+
+- **Log Files**:
+  - Android runtime logs are mirrored to internal and external storage:
+    `/sdcard/Android/data/com.mw2.recomp.sp/files/game.log` and `launcher.log`.
+  - On PC: pass `MW2_LOG_FILE=mw2.log` or view the terminal output.
+- **Black Screen on Android**:
+  - Check `game.log`. If the log reports `vulkan: the device lacks dynamic rendering and extended dynamic state`, your device's stock GPU driver lacks Vulkan 1.3 core features. For Adreno devices, use the in-app **Driver** menu to load a Turnip driver package.
+- **Performance Tuning**:
+  - Open **Settings** inside the Android app:
+    - Set **Render Scale** to `60% - 75%` for solid 60 FPS on mid-range devices.
+    - Keep **Multisampling (MSAA)** OFF on mobile tiled GPUs.
+    - Set **Texture Budget** to 256 MB or 512 MB to prevent memory pressure.
+
+---
+
+## Credits & Acknowledgments
+
+- **[PaulCombal/mw2-recompiled](https://github.com/PaulCombal/mw2-recompiled)**: Original Xbox 360 ahead-of-time recompilation project and Vulkan renderer architecture.
+- **[hedge-dev/XenonRecomp](https://github.com/hedge-dev/XenonRecomp)**: PowerPC to C++ static recompiler.
+- **[KisakCOD](https://github.com/SwagSoftware/KisakCOD)** & **[IW4x](https://github.com/iw4x/iw4x-client)**: Research into engine systems, audio mixing, and mobile input adaptations.
+- **[OpenAssetTools](https://github.com/Laupetin/OpenAssetTools)**: Call of Duty FastFile and asset format tools.
+- **[libadrenotools](https://github.com/bylaws/libadrenotools)**: Custom Vulkan driver loading on Android.
+
+---
 
 ## License
 
-[GPL-3.0-only](LICENSE) (`SPDX-License-Identifier: GPL-3.0-only`). It covers this
-project's own code: the runtime, tools, patches and build files. It grants
-nothing for the game: Activision's code and data, and the C++ generated from
-the game's executables, are not part of this repository and not under this
-license.
+This project is licensed under the **GNU General Public License v3.0** ([GPL-3.0-only](LICENSE.md)).  
+See [LICENSE.md](LICENSE.md) for full terms, conditions, and third-party notices.
 
-No game code or data is included; the builds only run with files from your
-own disc. Not affiliated with Activision, Infinity Ward or Microsoft.
+**Disclaimer**: This project is an independent open-source research initiative. It is not affiliated with, authorized, or endorsed by Activision, Infinity Ward, or Microsoft. All trademarks and game content belong to their respective owners. No copyrighted game assets or proprietary binaries are hosted in this repository.
