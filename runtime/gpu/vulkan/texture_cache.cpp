@@ -1207,7 +1207,6 @@ void vk::textures::SetBudget(uint64_t bytes)
 {
     const uint64_t floor = 48ull << 20;   // below this nothing would stay cached
     g.budget = std::max(bytes, floor);
-    g.nextEviction = 0;
 }
 
 void vk::textures::MemoryWritten(uint32_t physicalAddress, uint32_t size)
