@@ -38,9 +38,8 @@ if (kotlinSources.size < 10) {
 android {
     namespace = "com.mw2.recomp"
     compileSdk = 35
-    // r27 is the first NDK whose linker aligns a library for 16 KB pages by
-    // default and whose clang is new enough for the recompiled code's size.
-    ndkVersion = setting("MW2_NDK_VERSION") ?: "27.2.12479018"
+    // r27+ aligns a library for 16 KB pages by default and clang is new enough.
+    ndkVersion = setting("MW2_NDK_VERSION") ?: "28.2.13676358"
 
     defaultConfig {
         applicationId = "com.mw2.recomp"
