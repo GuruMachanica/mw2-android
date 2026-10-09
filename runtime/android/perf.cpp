@@ -80,13 +80,16 @@ namespace
             g_bigCoreCount = g_coreCount;
             return;
         }
-        const uint64_t threshold = fastest - fastest / 7;   // within ~15%
+        // Within ~30% captures both prime and performance/mid cores on tri-cluster
+        // SoCs (such as Google Tensor 2+2+4 or Snapdragon 1+3+4), while excluding
+        // low-frequency efficiency cores (Cortex-A55/A510).
+        const uint64_t threshold = fastest - fastest / 3;
         for (uint32_t cpu = 0; cpu < g_coreCount; cpu++)
             if (maximum[cpu] >= threshold) { CPU_SET(int(cpu), &g_bigCores); g_bigCoreCount++; }
 
-        // Two cores is not enough room for the guest, the ring consumer and
-        // the recorder; then the whole machine is fair game.
-        if (g_bigCoreCount < 3)
+        // If we found at least 2 fast cores, keep them; otherwise (e.g. single-core
+        // or uniform cluster) use all cores.
+        if (g_bigCoreCount < 2)
         {
             g_bigCores = g_allCores;
             g_bigCoreCount = g_coreCount;

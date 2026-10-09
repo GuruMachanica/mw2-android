@@ -24,12 +24,11 @@ Activision's servers), cutscene and loading movies. Special Ops is untested.
 
 - An ISO of the Xbox 360 disc, version 1.0.557 (as on the main menu; title
   updates can't be used). The installer checks it.
-- Linux or Windows, 64-bit; or Android 8.0 and later on a 64-bit phone
+- Linux or Windows, 64-bit; or Android 10 and later on a 64-bit phone (arm64-v8a)
   ([docs/android.md](docs/android.md))
-- A Vulkan 1.2 GPU (1.1 on Android)
-- 6 GB of disk space
-- A controller (the keyboard only covers the menus; Android has an
-  on-screen pad you can rearrange)
+- A Vulkan 1.3 GPU (MediaTek Dimensity / Mali, Google Tensor, Samsung Exynos / Xclipse, or Qualcomm Snapdragon / Adreno)
+- 6 GB of free storage space
+- A controller (the keyboard only covers the menus; Android has a fully customizable on-screen touch pad)
 
 ## Install
 
@@ -45,14 +44,16 @@ Saves go in `saves/` beside the executables.
 
 ## Android
 
-`android/` is a full port: the same runtime, a Vulkan surface from the
+`android/` is a full native port: the same runtime, native ARM64 execution, a Vulkan surface from the
 activity, AAudio, and an on-screen pad every part of which can be moved,
 resized, hidden or made to stay down when tapped. Physical controllers work
-and can be switched off entirely. An imported Turnip driver can be used in
-place of the phone's own.
+and can be switched off entirely.
 
-Building it means building the desktop project first (the recompiler runs
-there) and then Gradle: see [docs/android.md](docs/android.md).
+- **Universal SoC Support**: Tuned for MediaTek (Dimensity / Mali), Google Tensor, Samsung Exynos (Mali & AMD RDNA Xclipse), and Qualcomm Snapdragon (Turnip or system drivers).
+- **Direct Play & One-Tap Setup**: Automatically detects game disc images in `Downloads` for one-tap install, and supports direct game launching on startup.
+- **Android 10+ Compatible**: Fully patched for Android 10 scoped storage and Android 14/15 16 KB page sizes.
+
+Building it means generating the recompiled sources on desktop and building via Gradle: see [docs/android.md](docs/android.md).
 
 ## Play
 

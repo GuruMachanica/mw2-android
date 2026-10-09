@@ -131,6 +131,10 @@ class Prefs(context: Context) {
         get() = store.getBoolean(KEY_WELCOME, false)
         set(value) = store.edit().putBoolean(KEY_WELCOME, value).apply()
 
+    var autoLaunch: Boolean
+        get() = store.getBoolean(KEY_AUTO_LAUNCH, false)
+        set(value) = store.edit().putBoolean(KEY_AUTO_LAUNCH, value).apply()
+
     companion object {
         private const val KEY_RESOLUTION = "resolutionScale"
         private const val KEY_MSAA = "multisampling"
@@ -151,5 +155,6 @@ class Prefs(context: Context) {
         private const val KEY_GAME_DIR = "gameDirectory"
         private const val KEY_LAST_BROWSED = "lastBrowsed"
         private const val KEY_WELCOME = "seenWelcome"
+        private const val KEY_AUTO_LAUNCH = "autoLaunch"
     }
 }

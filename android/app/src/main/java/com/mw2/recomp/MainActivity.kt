@@ -26,7 +26,11 @@ class MainActivity : AppCompatActivity() {
     private lateinit var status: TextView
     private lateinit var footer: TextView
     private lateinit var play: Button
+    private lateinit var installButton: Button
+    private lateinit var directLaunchSwitch: androidx.appcompat.widget.SwitchCompat
+    private var detectedIsoFile: File? = null
     private var nativeReady = false
+    private var hasAutoLaunched = false
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
@@ -36,9 +40,32 @@ class MainActivity : AppCompatActivity() {
         status = findViewById(R.id.status)
         footer = findViewById(R.id.footer)
         play = findViewById(R.id.play)
+        installButton = findViewById(R.id.install)
+        directLaunchSwitch = findViewById(R.id.direct_launch_switch)
 
-        play.setOnClickListener { startGame() }
-        findViewById<Button>(R.id.install).setOnClickListener {
+        directLaunchSwitch.isChecked = prefs.autoLaunch
+        directLaunchSwitch.setOnCheckedChangeListener { _, isChecked ->
+            prefs.autoLaunch = isChecked
+        }
+
+        play.setOnClickListener {
+            val gameDirectory = prefs.gameDirectory
+            val installed = gameDirectory.isNotEmpty() && safely(false) {
+                NativeBridge.nativeGameInstalled(gameDirectory)
+            }
+            if (installed) {
+                startGame()
+            } else if (detectedIsoFile != null) {
+                val intent = Intent(this, InstallActivity::class.java).apply {
+                    putExtra(InstallActivity.EXTRA_INITIAL_PATH, detectedIsoFile!!.absolutePath)
+                    putExtra(InstallActivity.EXTRA_AUTO_START, true)
+                }
+                startActivity(intent)
+            } else {
+                startActivity(Intent(this, InstallActivity::class.java))
+            }
+        }
+        installButton.setOnClickListener {
             startActivity(Intent(this, InstallActivity::class.java))
         }
         findViewById<Button>(R.id.driver).setOnClickListener {
@@ -75,15 +102,6 @@ class MainActivity : AppCompatActivity() {
             }
         }
         Trail.clear(this)
-
-        if (!prefs.seenWelcome) {
-            prefs.seenWelcome = true
-            AlertDialog.Builder(this)
-                .setTitle(R.string.install_game)
-                .setMessage(R.string.status_not_installed)
-                .setPositiveButton(R.string.close, null)
-                .show()
-        }
     }
 
     override fun onResume() {
@@ -109,9 +127,42 @@ class MainActivity : AppCompatActivity() {
         val installed = gameDirectory.isNotEmpty() && safely(false) {
             NativeBridge.nativeGameInstalled(gameDirectory)
         }
-        play.isEnabled = installed
-        status.text = if (installed) getString(R.string.status_ready, gameDirectory)
-        else getString(R.string.status_not_installed)
+
+        if (installed) {
+            play.isEnabled = true
+            play.text = "▶ LAUNCH GAME"
+            status.text = "Status: Game Ready\nLocation: $gameDirectory"
+            installButton.visibility = android.view.View.GONE
+            directLaunchSwitch.visibility = android.view.View.VISIBLE
+
+            if (prefs.autoLaunch && !hasAutoLaunched) {
+                hasAutoLaunched = true
+                startGame()
+                return
+            }
+        } else {
+            val candidateIsos = listOf(
+                File("/sdcard/Download/mw2.iso"),
+                File("/sdcard/Download/Call of Duty - Modern Warfare 2 (USA, Europe).iso"),
+                File(getExternalFilesDir(null) ?: filesDir, "mw2.iso")
+            )
+            detectedIsoFile = candidateIsos.firstOrNull { it.exists() && it.length() > 500_000_000L }
+
+            if (detectedIsoFile != null) {
+                play.isEnabled = true
+                play.text = "⚡ INSTALL & PLAY"
+                status.text = "Game Disc Detected:\n${detectedIsoFile!!.name}\nReady for one-click setup."
+                installButton.visibility = android.view.View.VISIBLE
+                installButton.text = "Choose Another Source"
+            } else {
+                play.isEnabled = false
+                play.text = getString(R.string.play)
+                status.text = getString(R.string.status_not_installed)
+                installButton.visibility = android.view.View.VISIBLE
+                installButton.text = getString(R.string.install_game)
+            }
+            directLaunchSwitch.visibility = android.view.View.GONE
+        }
 
         applyDriverChoice()
         footer.text = getString(

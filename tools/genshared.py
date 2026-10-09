@@ -4,7 +4,7 @@ import title
 defs=set(); refs=set()
 for f in sorted(glob.glob(title.ppc("ppc_recomp.*.cpp")))+[title.ppc("ppc_func_mapping.cpp")]:
     s=open(f).read()
-    defs|=set(re.findall(r'PPC_WEAK_FUNC\(([A-Za-z_][A-Za-z0-9_]*)\)',s))
+    defs|=set(re.findall(r'(?:PPC_FUNC_IMPL|PPC_WEAK_FUNC)\(([A-Za-z_][A-Za-z0-9_]*)\)',s))
     refs|=set(re.findall(r'\b([A-Za-z_][A-Za-z0-9_]*)\(ctx, base\)',s))
     refs|=set(re.findall(r'\{ 0x[0-9A-F]+, ([A-Za-z_][A-Za-z0-9_]*) \}',s))
 refs.discard('PPC_CALL_INDIRECT_FUNC')

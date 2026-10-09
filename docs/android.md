@@ -19,9 +19,10 @@ two, and `cmake/android.cmake` is the only place the phone build differs.
 - Android Studio, or the command-line SDK with **NDK r27 or later** (r27 is
   the first whose linker aligns a library for 16 KB pages, which Android 15
   devices need) and **JDK 17**.
-- A phone with **arm64** and **Vulkan 1.1**, Android 8.0 or later. A 32-bit
-  build is refused at configure time: the guest's address space is a single
-  4 GiB reservation and will not fit in one.
+- A phone with **arm64** and **Vulkan 1.3** (or Vulkan 1.1 with `VK_KHR_dynamic_rendering`),
+  Android 10 or later. MediaTek Dimensity, Google Tensor, Samsung Exynos (Mali and Xclipse),
+  and Qualcomm Snapdragon are fully supported. A 32-bit build is refused at configure time:
+  the guest's address space is a single 4 GiB reservation and will not fit in one.
 
 Expect the native build to take **one to several hours** the first time. It
 is two million lines of generated C++ in a few hundred translation units;

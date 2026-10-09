@@ -107,6 +107,7 @@ namespace
         std::string component;
         auto step = [&](const std::string& name) -> bool
         {
+            if (name == "..") return false;
             if (name.empty() || name == ".") return true;
             fs::path direct = current / name;
             std::error_code ec;
@@ -182,10 +183,14 @@ namespace
         std::string component;
         for (char c : relative)
         {
-            if (c == '\\' || c == '/') { if (!component.empty()) out /= component; component.clear(); }
+            if (c == '\\' || c == '/')
+            {
+                if (component == "..") component.clear();
+                else if (!component.empty()) { out /= component; component.clear(); }
+            }
             else component += c;
         }
-        if (!component.empty()) out /= component;
+        if (component != ".." && !component.empty()) out /= component;
         return out;
     }
 

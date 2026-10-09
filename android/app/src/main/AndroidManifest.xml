@@ -25,6 +25,7 @@
     <application
         android:name=".MW2Application"
         android:allowBackup="false"
+        android:requestLegacyExternalStorage="true"
         android:dataExtractionRules="@xml/data_extraction_rules"
         android:fullBackupContent="false"
         android:icon="@mipmap/ic_launcher"

@@ -205,16 +205,23 @@ bool vk::renderer::Initialise()
     LOGI("renderer: %u frame slots of %u KB of arena each", kFrameSlots, g.arenaSlotBytes / 1024);
 
     // Before any command is recorded: the recorder thread only reads these.
-    const auto command = [](const char* name) { return vkGetDeviceProcAddr(g.device, name); };
-    dispatch.beginRendering = PFN_vkCmdBeginRenderingKHR(command("vkCmdBeginRenderingKHR"));
-    dispatch.endRendering = PFN_vkCmdEndRenderingKHR(command("vkCmdEndRenderingKHR"));
-    dispatch.setCullMode = PFN_vkCmdSetCullModeEXT(command("vkCmdSetCullModeEXT"));
-    dispatch.setFrontFace = PFN_vkCmdSetFrontFaceEXT(command("vkCmdSetFrontFaceEXT"));
-    dispatch.setDepthTestEnable = PFN_vkCmdSetDepthTestEnableEXT(command("vkCmdSetDepthTestEnableEXT"));
-    dispatch.setDepthWriteEnable = PFN_vkCmdSetDepthWriteEnableEXT(command("vkCmdSetDepthWriteEnableEXT"));
-    dispatch.setDepthCompareOp = PFN_vkCmdSetDepthCompareOpEXT(command("vkCmdSetDepthCompareOpEXT"));
-    dispatch.setStencilTestEnable = PFN_vkCmdSetStencilTestEnableEXT(command("vkCmdSetStencilTestEnableEXT"));
-    dispatch.setStencilOp = PFN_vkCmdSetStencilOpEXT(command("vkCmdSetStencilOpEXT"));
+    // On Vulkan 1.3 core devices (Mali, Tensor, etc.), the commands may be exported
+    // without the KHR / EXT suffix. Check both.
+    const auto command = [](const char* name, const char* fallback = nullptr) {
+        PFN_vkVoidFunction ptr = vkGetDeviceProcAddr(g.device, name);
+        if (!ptr && fallback)
+            ptr = vkGetDeviceProcAddr(g.device, fallback);
+        return ptr;
+    };
+    dispatch.beginRendering = PFN_vkCmdBeginRenderingKHR(command("vkCmdBeginRenderingKHR", "vkCmdBeginRendering"));
+    dispatch.endRendering = PFN_vkCmdEndRenderingKHR(command("vkCmdEndRenderingKHR", "vkCmdEndRendering"));
+    dispatch.setCullMode = PFN_vkCmdSetCullModeEXT(command("vkCmdSetCullModeEXT", "vkCmdSetCullMode"));
+    dispatch.setFrontFace = PFN_vkCmdSetFrontFaceEXT(command("vkCmdSetFrontFaceEXT", "vkCmdSetFrontFace"));
+    dispatch.setDepthTestEnable = PFN_vkCmdSetDepthTestEnableEXT(command("vkCmdSetDepthTestEnableEXT", "vkCmdSetDepthTestEnable"));
+    dispatch.setDepthWriteEnable = PFN_vkCmdSetDepthWriteEnableEXT(command("vkCmdSetDepthWriteEnableEXT", "vkCmdSetDepthWriteEnable"));
+    dispatch.setDepthCompareOp = PFN_vkCmdSetDepthCompareOpEXT(command("vkCmdSetDepthCompareOpEXT", "vkCmdSetDepthCompareOp"));
+    dispatch.setStencilTestEnable = PFN_vkCmdSetStencilTestEnableEXT(command("vkCmdSetStencilTestEnableEXT", "vkCmdSetStencilTestEnable"));
+    dispatch.setStencilOp = PFN_vkCmdSetStencilOpEXT(command("vkCmdSetStencilOpEXT", "vkCmdSetStencilOp"));
     if (!dispatch.beginRendering || !dispatch.endRendering || !dispatch.setCullMode ||
         !dispatch.setStencilOp)
     {

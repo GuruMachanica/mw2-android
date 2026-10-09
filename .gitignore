@@ -66,3 +66,7 @@ third_party/libadrenotools/
 
 # ---- the native build's scratch directory ----
 android/app/.cxx/
+.cxx/
+*.log
+*.tmp
+compile_commands.json

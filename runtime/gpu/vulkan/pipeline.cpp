@@ -157,6 +157,11 @@ bool vk::pipeline::CreateDevice(void* physicalDevice, uint32_t family,
     if (!supported.robustBufferAccess)
         LOGW("vulkan: the device offers no robust buffer access; an out-of-range vertex"
              " fetch will fault");
+    // Compressed BC textures (BC1..BC5) used throughout the title. Strict drivers
+    // (Mali, etc.) require this feature to be explicitly enabled before creating BC images.
+    enabled.textureCompressionBC = supported.textureCompressionBC;
+    if (!supported.textureCompressionBC)
+        LOGW("vulkan: the device does not report textureCompressionBC support");
     // The title's occlusion queries are a sample count it compares against a
     // threshold, and without this a query is only allowed to answer "some".
     enabled.occlusionQueryPrecise = supported.occlusionQueryPrecise;

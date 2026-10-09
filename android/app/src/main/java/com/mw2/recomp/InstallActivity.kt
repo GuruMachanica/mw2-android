@@ -140,6 +140,19 @@ class InstallActivity : AppCompatActivity() {
                     .show()
             }
         })
+
+        val initial = intent.getStringExtra(EXTRA_INITIAL_PATH)
+        if (!initial.isNullOrEmpty() && File(initial).exists()) {
+            useSource(initial)
+            if (intent.getBooleanExtra(EXTRA_AUTO_START, false)) {
+                start()
+            }
+        }
+    }
+
+    companion object {
+        const val EXTRA_INITIAL_PATH = "initial_path"
+        const val EXTRA_AUTO_START = "auto_start"
     }
 
     private fun useSource(path: String) {
@@ -348,11 +361,20 @@ class InstallActivity : AppCompatActivity() {
             progressText.text = getString(R.string.install_done)
             // The imported copy has done its job and is the size of a disc.
             File(getExternalFilesDir(null) ?: filesDir, "import").deleteRecursively()
-            AlertDialog.Builder(this)
-                .setTitle(R.string.install_game)
-                .setMessage(R.string.install_done)
-                .setPositiveButton(R.string.close) { _, _ -> finish() }
-                .show()
+            if (intent.getBooleanExtra(EXTRA_AUTO_START, false)) {
+                GameActivity.start(this)
+                finish()
+            } else {
+                AlertDialog.Builder(this)
+                    .setTitle(R.string.install_game)
+                    .setMessage(R.string.install_done)
+                    .setPositiveButton(R.string.play) { _, _ ->
+                        GameActivity.start(this)
+                        finish()
+                    }
+                    .setNegativeButton(R.string.close) { _, _ -> finish() }
+                    .show()
+            }
         } else {
             progressText.text = getString(R.string.install_failed, error)
             AlertDialog.Builder(this)

@@ -1,85 +1,142 @@
 <?xml version="1.0" encoding="utf-8"?>
 <ScrollView xmlns:android="http://schemas.android.com/apk/res/android"
+    xmlns:tools="http://schemas.android.com/tools"
     android:layout_width="match_parent"
     android:layout_height="match_parent"
     android:fillViewport="true"
-    android:background="#0B0E12">
+    android:background="#090C10">
 
     <LinearLayout
         android:layout_width="match_parent"
         android:layout_height="wrap_content"
         android:orientation="vertical"
-        android:padding="20dp">
+        android:paddingStart="24dp"
+        android:paddingEnd="24dp"
+        android:paddingTop="20dp"
+        android:paddingBottom="20dp">
 
+        <!-- Title Header -->
         <TextView
             android:layout_width="wrap_content"
             android:layout_height="wrap_content"
             android:text="@string/app_name"
-            android:textColor="#FFFFFF"
-            android:textSize="24sp"
-            android:textStyle="bold" />
+            android:textColor="#F0F6FC"
+            android:textSize="26sp"
+            android:fontFamily="sans-serif-black"
+            android:letterSpacing="0.03" />
 
         <TextView
             android:layout_width="wrap_content"
             android:layout_height="wrap_content"
             android:paddingTop="2dp"
             android:text="@string/subtitle"
-            android:textColor="#78828E"
-            android:textSize="12sp" />
+            android:textColor="#8B949E"
+            android:textSize="12sp"
+            android:fontFamily="sans-serif-medium" />
 
-        <TextView
-            android:id="@+id/status"
+        <!-- Hero Card (Status + Direct Launch) -->
+        <LinearLayout
             android:layout_width="match_parent"
             android:layout_height="wrap_content"
             android:layout_marginTop="16dp"
-            android:background="#141A21"
-            android:padding="12dp"
-            android:textColor="#C8D0D8"
-            android:textSize="13sp" />
+            android:background="#161B22"
+            android:orientation="vertical"
+            android:padding="16dp">
 
-        <Button
-            android:id="@+id/play"
-            android:layout_width="match_parent"
-            android:layout_height="wrap_content"
-            android:layout_marginTop="16dp"
-            android:minHeight="56dp"
-            android:text="@string/play"
-            android:textSize="18sp" />
+            <TextView
+                android:id="@+id/status"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:textColor="#C9D1D9"
+                android:textSize="13sp"
+                android:lineSpacingExtra="3dp" />
 
+            <!-- Primary Hero Button: Play or One-Tap Install -->
+            <Button
+                android:id="@+id/play"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:layout_marginTop="14dp"
+                android:minHeight="60dp"
+                android:backgroundTint="#238636"
+                android:text="@string/play"
+                android:textColor="#FFFFFF"
+                android:textSize="18sp"
+                android:textStyle="bold"
+                android:letterSpacing="0.05" />
+
+            <!-- Direct Launch Toggle -->
+            <androidx.appcompat.widget.SwitchCompat
+                android:id="@+id/direct_launch_switch"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:layout_marginTop="10dp"
+                android:text="Direct launch on app start"
+                android:textColor="#8B949E"
+                android:textSize="12sp" />
+        </LinearLayout>
+
+        <!-- Secondary Action: Manual Install (Shown if needed) -->
         <Button
             android:id="@+id/install"
             android:layout_width="match_parent"
             android:layout_height="wrap_content"
-            android:layout_marginTop="8dp"
-            android:text="@string/install_game" />
+            android:layout_marginTop="10dp"
+            android:backgroundTint="#21262D"
+            android:textColor="#C9D1D9"
+            android:text="@string/install_game"
+            android:textSize="14sp" />
 
-        <Button
-            android:id="@+id/driver"
+        <!-- Bottom Action Row: Driver, Settings, Logs -->
+        <LinearLayout
             android:layout_width="match_parent"
             android:layout_height="wrap_content"
-            android:layout_marginTop="8dp"
-            android:text="@string/graphics_driver" />
+            android:layout_marginTop="12dp"
+            android:orientation="horizontal">
 
-        <Button
-            android:id="@+id/settings"
-            android:layout_width="match_parent"
-            android:layout_height="wrap_content"
-            android:layout_marginTop="8dp"
-            android:text="@string/settings" />
+            <Button
+                android:id="@+id/driver"
+                android:layout_width="0dp"
+                android:layout_height="wrap_content"
+                android:layout_weight="1"
+                android:layout_marginEnd="4dp"
+                android:backgroundTint="#21262D"
+                android:textColor="#C9D1D9"
+                android:textSize="12sp"
+                android:text="@string/graphics_driver" />
 
-        <Button
-            android:id="@+id/log"
-            android:layout_width="match_parent"
-            android:layout_height="wrap_content"
-            android:layout_marginTop="8dp"
-            android:text="@string/view_log" />
+            <Button
+                android:id="@+id/settings"
+                android:layout_width="0dp"
+                android:layout_height="wrap_content"
+                android:layout_weight="1"
+                android:layout_marginStart="4dp"
+                android:layout_marginEnd="4dp"
+                android:backgroundTint="#21262D"
+                android:textColor="#C9D1D9"
+                android:textSize="12sp"
+                android:text="@string/settings" />
 
+            <Button
+                android:id="@+id/log"
+                android:layout_width="0dp"
+                android:layout_height="wrap_content"
+                android:layout_weight="1"
+                android:layout_marginStart="4dp"
+                android:backgroundTint="#21262D"
+                android:textColor="#C9D1D9"
+                android:textSize="12sp"
+                android:text="@string/view_log" />
+        </LinearLayout>
+
+        <!-- Device Info / Footer -->
         <TextView
             android:id="@+id/footer"
             android:layout_width="match_parent"
             android:layout_height="wrap_content"
             android:layout_marginTop="18dp"
-            android:textColor="#5B6672"
-            android:textSize="11sp" />
+            android:textColor="#484F58"
+            android:textSize="11sp"
+            android:lineSpacingExtra="2dp" />
     </LinearLayout>
 </ScrollView>
