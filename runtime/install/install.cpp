@@ -177,7 +177,7 @@ namespace
             const size_t n = std::strlen(suffix);
             return lower.size() >= n && lower.compare(lower.size() - n, n, suffix) == 0;
         };
-        return endsWith(".ff") || endsWith(".pak");
+        return endsWith(".ff") || endsWith(".pak") || endsWith(".bik") || lower == "nxeart";
     }
 
     struct Progress
