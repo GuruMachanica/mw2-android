@@ -1115,6 +1115,8 @@ namespace
         }
         if (!PickDevice() || !CreateDevice() || !CreateSwapchain() || !CreateFrames())
             return false;
+        SDL_ShowWindow(g.window);
+        SDL_RaiseWindow(g.window);
         // Everything else that touches the GPU -- the texture cache, the
         // renderer -- allocates against this device rather than one of its own,
         // because an image cannot be shared between two.
