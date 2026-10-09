@@ -1,5 +1,6 @@
 #include "download.h"
 #include "disc.h"
+#include "spawn.h"
 
 #ifdef _WIN32
 #include <windows.h>
@@ -26,7 +27,7 @@ bool install::Download(const std::string& url, const std::filesystem::path& to, 
     const std::string path = Utf8(to);
     const char* const args[] = { "curl", "--location", "--fail", "--silent", "--show-error", "--max-time", "300",
                                  "--output", path.c_str(), url.c_str(), nullptr };
-    SDL_Process* process = SDL_CreateProcess(args, false);
+    SDL_Process* process = spawn::Start(args);
     if (!process) { error = "curl could not be started"; return false; }
     int code = -1;
     SDL_WaitProcess(process, true, &code);
