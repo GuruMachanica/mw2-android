@@ -1,13 +1,14 @@
 #!/usr/bin/env python3
 """Decrypt + decompress (basic) an XEX2 into its raw PE image, and dump PE sections."""
-import struct, sys, subprocess, os
+import struct, sys, subprocess, os, shutil
 
+OPENSSL = shutil.which("openssl") or (r"C:\Program Files\Git\usr\bin\openssl.exe" if os.path.exists(r"C:\Program Files\Git\usr\bin\openssl.exe") else "openssl")
 RETAIL_KEY = "20B185A59D28FDC340583FBB0896BF91"
 ZERO_IV = "00"*16
 
 def aes_cbc_dec(key_hex, data):
     return subprocess.run(
-        ["openssl","enc","-aes-128-cbc","-d","-K",key_hex,"-iv",ZERO_IV,"-nopad"],
+        [OPENSSL,"enc","-aes-128-cbc","-d","-K",key_hex,"-iv",ZERO_IV,"-nopad"],
         input=data, capture_output=True, check=True).stdout
 
 def load(path):
