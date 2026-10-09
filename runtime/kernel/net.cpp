@@ -87,6 +87,7 @@ namespace
     {
         socket_t host = socket_t(INVALID_SOCKET);
         uint16_t port = 0;   // the title's, as it bound it; 0 until then
+        bool bound = false;
     };
     std::mutex g_socketLock;
     std::map<uint32_t, Socket> g_sockets;
@@ -469,6 +470,7 @@ PPC_FUNC(__imp__NetDll_bind)
     if (s == socket_t(INVALID_SOCKET) || !ReadSockAddr(ctx.r5.u32, addr))
     { t_lastError = 10022; ctx.r3.u64 = uint32_t(-1); return; }
 
+    bool bound = true;
     if (!online::Get() && ::bind(s, reinterpret_cast<sockaddr*>(&addr), sizeof addr) != 0)
     {
         t_lastError = LastHostError();
@@ -481,10 +483,12 @@ PPC_FUNC(__imp__NetDll_bind)
         if (t_lastError != 10048) { ctx.r3.u64 = uint32_t(-1); return; }
         LOGW("net: port %u is taken by another copy of the game on this machine; this copy has no network",
              unsigned(ntohs(UnshiftPort(addr.sin_port))));
+        bound = false;
     }
     {
         std::lock_guard g(g_socketLock);
         g_sockets[ctx.r4.u32].port = ntohs(UnshiftPort(addr.sin_port));
+        g_sockets[ctx.r4.u32].bound = bound;
     }
     ctx.r3.u64 = 0;
 }
@@ -539,6 +543,11 @@ PPC_FUNC(__imp__NetDll_sendto)
     { t_lastError = 10022; ctx.r3.u64 = uint32_t(-1); return; }
 
     auto* buffer = GuestPtr<const char>(ctx.r5.u32);
+    if (!socket.bound && !online::Get())
+    {
+        ctx.r3.u64 = ctx.r6.u32;
+        return;
+    }
     if (auto* service = online::Get())
     {
         const uint32_t to = ntohl(addr.sin_addr.s_addr);
@@ -578,8 +587,16 @@ PPC_FUNC(__imp__NetDll_sendto)
 
 PPC_FUNC(__imp__NetDll_recvfrom)
 {
-    socket_t s = HostSocket(ctx.r4.u32);
+    const Socket socket = FindSocket(ctx.r4.u32);
+    socket_t s = socket.host;
     if (s == socket_t(INVALID_SOCKET)) { t_lastError = 10038; ctx.r3.u64 = uint32_t(-1); return; }
+
+    if (!socket.bound && !online::Get())
+    {
+        t_lastError = 10035;   // WSAEWOULDBLOCK: the socket is unbound, so no incoming data
+        ctx.r3.u64 = uint32_t(-1);
+        return;
+    }
 
     if (auto* service = online::Get())
     {
