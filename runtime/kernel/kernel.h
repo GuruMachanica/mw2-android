@@ -1,5 +1,9 @@
 #pragma once
+#if __has_include(<ppc_recomp_shared.h>)
 #include <ppc_recomp_shared.h>
+#else
+#include "../../ppc/ppc_recomp_shared.h"
+#endif
 #include "physical.h"
 #include "../guest.h"
 #include <cstdint>

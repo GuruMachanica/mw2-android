@@ -1,0 +1,17 @@
+CompileFlags:
+  CompilationDatabase: "."
+  Add:
+    - "-std=gnu++20"
+    - "-Ippc"
+    - "-Iruntime"
+    - "-IXenonRecomp/thirdparty/simde"
+    - "-Ithird_party/ffmpeg-xenia"
+    - "-Ibuild-win/_deps/sdl3-src/include"
+    - "-Ibuild-win/_deps/sdl3-build/include-revision"
+    - "-Ibuild-win/_deps/imgui-src"
+    - "-Ibuild-win/_deps/vulkan_headers-src/include"
+    - "-DMW2_USE_SDL=1"
+    - "-DMW2_HAVE_VULKAN=1"
+    - "-DMW2_DIAGNOSTICS=1"
+Diagnostics:
+  UnusedIncludes: None
