@@ -1,10 +1,11 @@
+#ifdef _WIN32
+#include <windows.h>
+#endif
+
 #include "download.h"
 #include "disc.h"
 
-#ifdef _WIN32
-#include <windows.h>
-#include <urlmon.h>
-#else
+#ifndef _WIN32
 #include <SDL3/SDL.h>
 #endif
 
@@ -13,8 +14,14 @@ bool install::Download(const std::string& url, const std::filesystem::path& to, 
     std::error_code ec;
     std::filesystem::remove(to, ec);
 #ifdef _WIN32
+    typedef HRESULT (WINAPI *URLDownloadToFileW_fn)(void*, const wchar_t*, const wchar_t*, DWORD, void*);
+    HMODULE urlmon = LoadLibraryA("urlmon.dll");
+    if (!urlmon) { error = "urlmon.dll not found"; return false; }
+    auto download_fn = reinterpret_cast<URLDownloadToFileW_fn>(GetProcAddress(urlmon, "URLDownloadToFileW"));
+    if (!download_fn) { FreeLibrary(urlmon); error = "URLDownloadToFileW not found"; return false; }
     const std::wstring wide(url.begin(), url.end());     // the URL is ASCII
-    const HRESULT result = URLDownloadToFileW(nullptr, wide.c_str(), to.c_str(), 0, nullptr);
+    const HRESULT result = download_fn(nullptr, wide.c_str(), to.c_str(), 0, nullptr);
+    FreeLibrary(urlmon);
     if (FAILED(result))
     {
         char text[64];

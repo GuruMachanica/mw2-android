@@ -333,14 +333,18 @@ namespace vk::renderer::detail
         highest = high;
     }
 
+#if !defined(_WIN32)
     __attribute__((target_clones("avx2", "default")))
+#endif
     void SwapIndices16(const uint8_t* source, uint16_t* out, uint32_t count, uint16_t& lowest,
                        uint16_t& highest)
     {
         SwapIndices(source, out, count, lowest, highest);
     }
 
+#if !defined(_WIN32)
     __attribute__((target_clones("avx2", "default")))
+#endif
     void SwapIndices32(const uint8_t* source, uint32_t* out, uint32_t count, uint32_t& lowest,
                        uint32_t& highest)
     {

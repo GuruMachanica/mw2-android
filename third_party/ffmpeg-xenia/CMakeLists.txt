@@ -272,4 +272,6 @@ if(NOT WIN32 AND NOT ANDROID)
 elseif(ANDROID)
     # bionic carries pthread and libm inside libc.
     target_link_libraries(ffmpeg_xma PUBLIC m)
+elseif(WIN32)
+    target_link_libraries(ffmpeg_xma PUBLIC bcrypt)
 endif()
