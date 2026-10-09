@@ -57,10 +57,13 @@ walking to it.
 | switch | effect |
 |---|---|
 | `MW2_WALK_TO="x,y[,radius[,yaw]]"` | walks to a point and holds there, facing the yaw given or turning slowly; reports the closest approach and how often it got itself unstuck |
-| `MW2_WALK_PATH=<file>[,<file>...]` | walks a recorded route (`x y` per line); with several, the one starting nearest the spawn. A line `left x y z yaw pitch` or `fire x y z yaw pitch` goes to the spot, turns to the aim, and presses d-pad left or the right trigger there |
+| `MW2_WALK_PATH=<file>[,<file>...]` | walks a recorded route (`x y z yaw pitch` per line), looking where the player looked; with several, the one starting nearest the spawn. A line `left x y z yaw pitch` or `fire x y z yaw pitch` goes to the spot, turns to the aim, and presses d-pad left or the right trigger there |
 | `MW2_TEAM_UP=1\|2` | on the team selection, taps Up that many times before choosing, instead of Auto-assign, so a run spawns on the same side every time |
+| `MW2_WALK_REACH=<units>` | how near a route's point the walk has to come before heading for the next: 24 for a point recorded with its view, 140 for the older routes that stop at yaw |
 | `MW2_WALK_PAUSE=<seconds>` | stands still at every corner of the route |
 | `MW2_QUIT_AFTER_ARRIVAL=<seconds>` | ends the run that long after the walk arrives, or after it stops getting nearer for `MW2_QUIT_IF_STUCK` seconds (45) |
+| `MW2_RECORD_FLIGHT=<file>` | writes where the camera is and when, twenty times a second, as a flight for `MW2_FLY_PATH`; noclip and all |
+| `MW2_FLY_PATH=<file>` | replays a recorded flight by placing the camera with `setviewpos`, at the same moments counted from the first frame with a player; campaign only, and `MW2_QUIT_AFTER_ARRIVAL` counts from its end |
 | `MW2_RECORD_PATH=<file>` | writes where the player goes as a route for `MW2_WALK_PATH`, a point every `MW2_RECORD_SPACING` units (110), with d-pad left and right-trigger presses and their aim |
 | `MW2_F5=<command>` | with the window open, `F5` runs that console command: `MW2_F5=noclip` after `devmap`, to fly once a level's opening is behind |
 | `MW2_TRACE_VIEWPOS=1` | logs where the player stands once a second |

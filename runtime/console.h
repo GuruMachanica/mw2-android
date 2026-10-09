@@ -9,4 +9,7 @@ namespace console
     void Pump(PPCContext& ctx, unsigned char* base);
     // Queues one command for the next pump, from any thread -- a key press.
     void RunNow(const char* text);
+    // The same for a command sent every frame, a camera being moved: the one
+    // waiting is replaced instead of queued behind, and none of them is logged.
+    void Place(const char* text);
 }
