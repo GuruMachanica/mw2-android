@@ -42,7 +42,7 @@ class Prefs(context: Context) {
         set(value) = store.edit().putInt(KEY_TEXTURE_MB, value).apply()
 
     var showStats: Boolean
-        get() = store.getBoolean(KEY_SHOW_STATS, false)
+        get() = store.getBoolean(KEY_SHOW_STATS, true)
         set(value) = store.edit().putBoolean(KEY_SHOW_STATS, value).apply()
 
     /**

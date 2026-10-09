@@ -2,11 +2,16 @@ package com.mw2.recomp
 
 import android.annotation.SuppressLint
 import android.app.Activity
+import android.app.ActivityManager
 import android.content.ComponentCallbacks2
 import android.content.Context
 import android.content.Intent
+import android.content.IntentFilter
 import android.content.res.Configuration
 import android.graphics.Color
+import android.graphics.Typeface
+import android.graphics.drawable.GradientDrawable
+import android.os.BatteryManager
 import android.os.Build
 import android.os.Bundle
 import android.os.Handler
@@ -23,6 +28,8 @@ import android.view.SurfaceView
 import android.view.View
 import android.view.ViewGroup
 import android.view.WindowManager
+import java.io.File
+import java.util.Locale
 import android.widget.Button
 import android.widget.FrameLayout
 import android.widget.SeekBar
@@ -67,14 +74,56 @@ class GameActivity : AppCompatActivity(), NativeListener {
     private val statsValues = FloatArray(4)
     private var started = false
 
+    private fun getDeviceTemp(): Float {
+        for (i in 0..15) {
+            val file = File("/sys/class/thermal/thermal_zone$i/temp")
+            if (file.exists()) {
+                try {
+                    val raw = file.readText().trim().toLongOrNull() ?: continue
+                    val c = if (raw > 1000) raw / 1000f else raw.toFloat()
+                    if (c in 20.0f..105.0f) return c
+                } catch (_: Exception) {}
+            }
+        }
+        try {
+            val filter = IntentFilter(Intent.ACTION_BATTERY_CHANGED)
+            val batteryIntent = registerReceiver(null, filter)
+            val temp = batteryIntent?.getIntExtra(BatteryManager.EXTRA_TEMPERATURE, 0) ?: 0
+            if (temp > 0) return temp / 10.0f
+        } catch (_: Exception) {}
+        return 0f
+    }
+
+    private fun getRamUsage(): String {
+        return try {
+            val actManager = getSystemService(Context.ACTIVITY_SERVICE) as? ActivityManager
+            val memInfo = ActivityManager.MemoryInfo()
+            actManager?.getMemoryInfo(memInfo)
+            val usedGb = (memInfo.totalMem - memInfo.availMem) / (1024.0 * 1024.0 * 1024.0)
+            String.format(Locale.US, "%.1fG", usedGb)
+        } catch (_: Exception) {
+            ""
+        }
+    }
+
     private val statsTick = object : Runnable {
         override fun run() {
             if (prefs.showStats && NativeBridge.isLoaded()) {
                 NativeBridge.nativeStats(statsValues)
-                statsText.text = getString(
-                    R.string.stats_line,
-                    statsValues[0], statsValues[1].roundToInt(),
-                    statsValues[2].roundToInt(), statsValues[3].roundToInt(),
+                val fps = statsValues[0].roundToInt()
+                val texMb = statsValues[1].roundToInt()
+                val resW = statsValues[2].roundToInt()
+                val resH = statsValues[3].roundToInt()
+                val temp = getDeviceTemp()
+                val ram = getRamUsage()
+
+                val tempPart = if (temp > 0f) String.format(Locale.US, "  •  %.0f°C", temp) else ""
+                val ramPart = if (ram.isNotEmpty()) "  •  RAM $ram" else ""
+
+                statsText.text = String.format(
+                    Locale.US,
+                    "%d FPS%s%s  •  Tex %dMB  •  %d×%d",
+                    fps, tempPart, ramPart, texMb, resW, resH
                 )
             }
             handler.postDelayed(this, 500)
@@ -199,16 +248,23 @@ class GameActivity : AppCompatActivity(), NativeListener {
         )
 
         statsText = TextView(this)
-        statsText.setTextColor(Color.argb(200, 180, 255, 180))
-        statsText.textSize = 11f
-        statsText.setPadding(pad(10), pad(4), pad(10), pad(4))
+        statsText.setTextColor(Color.argb(240, 224, 242, 254))
+        statsText.textSize = 10.5f
+        statsText.typeface = Typeface.MONOSPACE
+        statsText.setPadding(pad(10), pad(3), pad(10), pad(3))
+        val pillBg = GradientDrawable().apply {
+            setColor(Color.argb(200, 15, 23, 42))
+            cornerRadius = pad(10).toFloat()
+            setStroke(pad(1), Color.argb(60, 148, 163, 184))
+        }
+        statsText.background = pillBg
         statsText.visibility = if (prefs.showStats) View.VISIBLE else View.GONE
         root.addView(
             statsText,
             FrameLayout.LayoutParams(
                 ViewGroup.LayoutParams.WRAP_CONTENT, ViewGroup.LayoutParams.WRAP_CONTENT,
                 Gravity.TOP or Gravity.START,
-            )
+            ).apply { topMargin = pad(6); marginStart = pad(8) }
         )
 
         menuButton = smallButton(getString(R.string.menu)) { showMenu() }

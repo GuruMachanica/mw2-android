@@ -4,6 +4,7 @@
 #include "pipeline.h"
 #include "recorder.h"
 #include "texture_formats.h"
+#include "bc_decoder.h"
 #include "../texture.h"
 #include "../memory_watch.h"
 #include "renderer.h"
@@ -812,6 +813,20 @@ namespace
             Fail("no Vulkan equivalent for the format", error);
             return vk::textures::kNone;
         }
+
+        static const bool s_forceBcDecompress = std::getenv("MW2_FORCE_BC_DECOMPRESS") != nullptr;
+        gpu::TextureData decompressed;
+        const gpu::TextureData* pData = &data;
+        if (vk::bc::IsBCFormat(xenosFormat) && (!vk::pipeline::TextureCompressionBC() || s_forceBcDecompress))
+        {
+            int decompFormat = 0;
+            if (vk::bc::Decompress(data, xenosFormat, decompressed, decompFormat))
+            {
+                format = decompFormat;
+                pData = &decompressed;
+            }
+        }
+
         // The fetch constant asked for the stored value to be linearised. An
         // sRGB image does that in the sampler; the bytes uploaded are the same
         // ones either way, so only the format changes.
@@ -827,16 +842,16 @@ namespace
         // plausible textures of impossible size. Creating one is undefined behaviour
         // rather than an error -- the driver here builds the image and returns
         // garbage -- so the size has to be checked.
-        if (data.width > g.maxDimension || data.height > g.maxDimension)
+        if (pData->width > g.maxDimension || pData->height > g.maxDimension)
         {
             Fail("larger than the device allows", error);
             return vk::textures::kNone;
         }
 
         Image image;
-        image.oneDimensional = oneDimensional && data.height == 1;
-        image.layers = data.layers;
-        image.volume = data.volume;
+        image.oneDimensional = oneDimensional && pData->height == 1;
+        image.layers = pData->layers;
+        image.volume = pData->volume;
         image.sourceBytes = sourceBytes;
         image.signature = signature;
         // What the fetch constant asks for is in guest channels, which are not
@@ -846,18 +861,18 @@ namespace
         image.swizzle =
             vk::formats::ComposeSwizzle(swizzle, vk::formats::HostSwizzleFor(xenosFormat));
         image.format = VkFormat(format);
-        image.width = data.width;
-        image.height = data.height;
-        image.blocksWide = data.blocksWide;
-        image.blocksHigh = data.blocksHigh;
-        image.bytesPerBlock = data.bytesPerBlock;
-        image.blockWidth = data.expanded ? 1 : info.blockWidth;
-        image.blockHeight = data.expanded ? 1 : info.blockHeight;
-        image.bytes = data.bytes.size();
-        image.levels = data.levels;
+        image.width = pData->width;
+        image.height = pData->height;
+        image.blocksWide = pData->blocksWide;
+        image.blocksHigh = pData->blocksHigh;
+        image.bytesPerBlock = pData->bytesPerBlock;
+        image.blockWidth = pData->expanded ? 1 : info.blockWidth;
+        image.blockHeight = pData->expanded ? 1 : info.blockHeight;
+        image.bytes = pData->bytes.size();
+        image.levels = pData->levels;
 
         if (!MakeImage(image, error)) { DestroyImage(image); return vk::textures::kNone; }
-        if (!StageInto(image, data.bytes.data(), data.bytes.size(), error))
+        if (!StageInto(image, pData->bytes.data(), pData->bytes.size(), error))
         {
             DestroyImage(image);
             return vk::textures::kNone;
