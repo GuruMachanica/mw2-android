@@ -31,6 +31,10 @@
 #include <vector>
 #endif
 
+#ifdef _WIN32
+#include <windows.h>
+#endif
+
 namespace
 {
     // XINPUT_GAMEPAD, big-endian in guest memory.
@@ -442,6 +446,34 @@ PPC_FUNC(__imp__XamInputGetState)
         {
             KeyboardMoveAxes(axes[0], axes[1]);
             b |= MouseInputs(triggers, axes[2], axes[3]);
+#ifdef _WIN32
+            auto isDown = [](int vk) { return (GetAsyncKeyState(vk) & 0x8000) != 0; };
+            if (isDown(VK_RETURN) || isDown(VK_ESCAPE)) b |= BTN_START;
+            if (isDown(VK_TAB) || isDown(VK_BACK))      b |= BTN_BACK;
+            if (isDown(VK_UP))                          b |= BTN_DPAD_UP;
+            if (isDown(VK_DOWN))                        b |= BTN_DPAD_DOWN;
+            if (isDown(VK_LEFT))                        b |= BTN_DPAD_LEFT;
+            if (isDown(VK_RIGHT))                       b |= BTN_DPAD_RIGHT;
+
+            if (isDown(VK_SPACE) || isDown('Z') || isDown(VK_RETURN)) b |= BTN_A;
+            if (isDown('C') || isDown(VK_CONTROL) || isDown('X'))      b |= BTN_B;
+            if (isDown('R') || isDown('F'))                           b |= BTN_X;
+            if (isDown('1') || isDown('2') || isDown('Y'))            b |= BTN_Y;
+
+            if (isDown('Q') || isDown('4'))                           b |= BTN_LB;
+            if (isDown('G') || isDown('E'))                           b |= BTN_RB;
+
+            if (isDown(VK_SHIFT))                                     b |= BTN_LTHUMB;
+            if (isDown('V') || isDown(VK_MBUTTON))                    b |= BTN_RTHUMB;
+
+            if (isDown(VK_LBUTTON)) triggers[1] = 255;
+            if (isDown(VK_RBUTTON)) triggers[0] = 255;
+
+            if (isDown('W')) { axes[1] = 32767;  b |= BTN_DPAD_UP; }
+            if (isDown('S')) { axes[1] = -32768; b |= BTN_DPAD_DOWN; }
+            if (isDown('D')) { axes[0] = 32767;  b |= BTN_DPAD_RIGHT; }
+            if (isDown('A')) { axes[0] = -32768; b |= BTN_DPAD_LEFT; }
+#endif
             if (axes[1] > 16000) b |= BTN_DPAD_UP;
             else if (axes[1] < -16000) b |= BTN_DPAD_DOWN;
             if (axes[0] > 16000) b |= BTN_DPAD_RIGHT;
