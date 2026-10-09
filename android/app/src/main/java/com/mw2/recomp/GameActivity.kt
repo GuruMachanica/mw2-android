@@ -28,10 +28,12 @@ import android.view.SurfaceView
 import android.view.View
 import android.view.ViewGroup
 import android.view.WindowManager
+import android.os.SystemClock
 import java.io.File
 import java.util.Locale
 import android.widget.Button
 import android.widget.FrameLayout
+import android.widget.LinearLayout
 import android.widget.SeekBar
 import android.widget.TextView
 import androidx.activity.OnBackPressedCallback
@@ -62,7 +64,11 @@ class GameActivity : AppCompatActivity(), NativeListener {
     private lateinit var surfaceView: SurfaceView
     private lateinit var overlay: TouchOverlayView
     private lateinit var root: FrameLayout
+    private lateinit var hudContainer: FrameLayout
     private lateinit var statsText: TextView
+    private lateinit var hudExpandedCard: LinearLayout
+    private lateinit var hudExpandedText: TextView
+    private var hudIsExpanded = false
     private lateinit var menuButton: Button
     private var editPanel: EditPanel? = null
 
@@ -71,8 +77,92 @@ class GameActivity : AppCompatActivity(), NativeListener {
     private var vibrator: Vibrator? = null
     private var lastRumble = 0
 
-    private val statsValues = FloatArray(4)
+    private val statsValues = FloatArray(6)
     private var started = false
+    private var cachedRendererInfo = ""
+
+    private var cpuUsagePercent = -1f
+    private var lastCpuTotal = 0L
+    private var lastCpuIdle = 0L
+    private var lastProcTime = 0L
+    private var lastProcSampleTime = 0L
+    @Volatile private var monitoringActive = true
+    private var monitorThread: Thread? = null
+
+    private fun startHardwareMonitor() {
+        monitoringActive = true
+        monitorThread = Thread {
+            while (monitoringActive) {
+                sampleCpu()
+                try {
+                    Thread.sleep(1000)
+                } catch (_: InterruptedException) {
+                    break
+                }
+            }
+        }.apply {
+            isDaemon = true
+            name = "mw2-hw-monitor"
+            start()
+        }
+    }
+
+    private fun sampleCpu() {
+        try {
+            val statFile = File("/proc/stat")
+            if (statFile.exists()) {
+                val line = statFile.bufferedReader().use { it.readLine() }
+                if (line != null && line.startsWith("cpu ")) {
+                    val parts = line.split("\\s+".toRegex())
+                    if (parts.size >= 5) {
+                        val user = parts[1].toLong()
+                        val nice = parts[2].toLong()
+                        val sys = parts[3].toLong()
+                        val idle = parts[4].toLong()
+                        val iowait = if (parts.size > 5) parts[5].toLong() else 0L
+                        val total = user + nice + sys + idle + iowait
+                        val idleTotal = idle + iowait
+                        if (lastCpuTotal > 0 && total > lastCpuTotal) {
+                            val dTotal = total - lastCpuTotal
+                            val dIdle = idleTotal - lastCpuIdle
+                            cpuUsagePercent = ((dTotal - dIdle).toFloat() / dTotal.toFloat()) * 100f
+                        }
+                        lastCpuTotal = total
+                        lastCpuIdle = idleTotal
+                        return
+                    }
+                }
+            }
+        } catch (_: Exception) {}
+
+        try {
+            val statFile = File("/proc/self/stat")
+            if (statFile.exists()) {
+                val line = statFile.readText().trim()
+                val rParen = line.lastIndexOf(')')
+                if (rParen > 0) {
+                    val rest = line.substring(rParen + 2).split(" ")
+                    val utime = rest[11].toLong()
+                    val stime = rest[12].toLong()
+                    val procTime = utime + stime
+                    val now = SystemClock.elapsedRealtime()
+                    if (lastProcSampleTime > 0 && now > lastProcSampleTime) {
+                        val dTimeMs = now - lastProcSampleTime
+                        val dTicks = procTime - lastProcTime
+                        val dProcMs = dTicks * 10L
+                        val cores = Runtime.getRuntime().availableProcessors().coerceAtLeast(1)
+                        val pct = (dProcMs.toFloat() / (dTimeMs * cores).toFloat()) * 100f
+                        cpuUsagePercent = pct.coerceIn(0f, 100f)
+                    }
+                    lastProcTime = procTime
+                    lastProcSampleTime = now
+                    return
+                }
+            }
+        } catch (_: Exception) {}
+
+        cpuUsagePercent = -1f
+    }
 
     private fun getDeviceTemp(): Float {
         for (i in 0..15) {
@@ -94,15 +184,34 @@ class GameActivity : AppCompatActivity(), NativeListener {
         return 0f
     }
 
-    private fun getRamUsage(): String {
+    private fun getMemoryStats(): Pair<Int, Int> {
         return try {
             val actManager = getSystemService(Context.ACTIVITY_SERVICE) as? ActivityManager
             val memInfo = ActivityManager.MemoryInfo()
             actManager?.getMemoryInfo(memInfo)
-            val usedGb = (memInfo.totalMem - memInfo.availMem) / (1024.0 * 1024.0 * 1024.0)
-            String.format(Locale.US, "%.1fG", usedGb)
+            val totalMb = (memInfo.totalMem / (1024 * 1024)).toInt()
+            val jvm = Runtime.getRuntime().totalMemory() - Runtime.getRuntime().freeMemory()
+            val nativeMem = android.os.Debug.getNativeHeapAllocatedSize()
+            val appMb = ((jvm + nativeMem) / (1024 * 1024)).toInt()
+            Pair(appMb, totalMb)
         } catch (_: Exception) {
-            ""
+            Pair(0, 0)
+        }
+    }
+
+    private fun getBatteryStats(): Triple<Float, Boolean, Int> {
+        return try {
+            val filter = IntentFilter(Intent.ACTION_BATTERY_CHANGED)
+            val intent = registerReceiver(null, filter)
+            val raw = intent?.getIntExtra(BatteryManager.EXTRA_TEMPERATURE, 0) ?: 0
+            val tempC = if (raw > 0) raw / 10.0f else 0.0f
+            val status = intent?.getIntExtra(BatteryManager.EXTRA_STATUS, -1) ?: -1
+            val isCharging = status == BatteryManager.BATTERY_STATUS_CHARGING ||
+                             status == BatteryManager.BATTERY_STATUS_FULL
+            val level = intent?.getIntExtra(BatteryManager.EXTRA_LEVEL, -1) ?: -1
+            Triple(tempC, isCharging, level)
+        } catch (_: Exception) {
+            Triple(0f, false, -1)
         }
     }
 
@@ -110,21 +219,70 @@ class GameActivity : AppCompatActivity(), NativeListener {
         override fun run() {
             if (prefs.showStats && NativeBridge.isLoaded()) {
                 NativeBridge.nativeStats(statsValues)
+                if (cachedRendererInfo.isEmpty()) {
+                    try {
+                        cachedRendererInfo = NativeBridge.nativeRendererInfo()
+                    } catch (_: Throwable) {
+                        cachedRendererInfo = "Vulkan | Mali Fallback | Native"
+                    }
+                }
+
                 val fps = statsValues[0].roundToInt()
                 val texMb = statsValues[1].roundToInt()
                 val resW = statsValues[2].roundToInt()
                 val resH = statsValues[3].roundToInt()
-                val temp = getDeviceTemp()
-                val ram = getRamUsage()
+                val frameTimeMs = if (statsValues[4] > 0.01f) statsValues[4] else if (fps > 0) 1000f / fps else 0f
+                val framesPresented = statsValues[5].toLong()
 
-                val tempPart = if (temp > 0f) String.format(Locale.US, "  •  %.0f°C", temp) else ""
-                val ramPart = if (ram.isNotEmpty()) "  •  RAM $ram" else ""
+                val temp = getDeviceTemp()
+                val (appMb, totalMb) = getMemoryStats()
+                val (battTemp, isCharging, battPct) = getBatteryStats()
+                val cpuStr = if (cpuUsagePercent >= 0f) String.format(Locale.US, "%.0f%%", cpuUsagePercent) else "N/A"
+
+                val tempPart = if (temp > 0f) String.format(Locale.US, " · %.0f°C", temp) else ""
+                val ramPart = if (appMb > 0) String.format(Locale.US, " · RAM %dM", appMb) else ""
+                val ftPart = if (frameTimeMs > 0f) String.format(Locale.US, " · %.1fms", frameTimeMs) else ""
 
                 statsText.text = String.format(
                     Locale.US,
-                    "%d FPS%s%s  •  Tex %dMB  •  %d×%d",
-                    fps, tempPart, ramPart, texMb, resW, resH
+                    "%d FPS%s  •  CPU %s%s%s  •  Tex %dMB  [▼ HUD]",
+                    fps, ftPart, cpuStr, tempPart, ramPart, texMb
                 )
+
+                if (hudIsExpanded) {
+                    val parts = cachedRendererInfo.split("|")
+                    val devName = if (parts.isNotEmpty() && parts[0].isNotEmpty()) parts[0] else "Vulkan Device"
+                    val renderMode = if (parts.size > 1) parts[1] else "Vulkan 1.1 Legacy RenderPass"
+                    val tcMode = if (parts.size > 2) parts[2] else "CPU Decompress Fallback"
+
+                    val battStr = if (battTemp > 0f) {
+                        val chg = if (isCharging) " (Chg $battPct%)" else if (battPct >= 0) " ($battPct%)" else ""
+                        String.format(Locale.US, "%.1f°C%s", battTemp, chg)
+                    } else "N/A"
+
+                    val ramStr = if (totalMb > 0) String.format(Locale.US, "%d MB / %d MB", appMb, totalMb)
+                                 else if (appMb > 0) "$appMb MB" else "N/A"
+                    val cpuTempStr = if (temp > 0f) String.format(Locale.US, "%.0f°C", temp) else "N/A"
+
+                    hudExpandedText.text = buildString {
+                        append("FPS / FRAME TIME\n")
+                        append(String.format(Locale.US, "  ▶ %d FPS   (%.1f ms)\n", fps, frameTimeMs))
+                        append(String.format(Locale.US, "  Presented: %,d frames\n\n", framesPresented))
+
+                        append("CPU & SYSTEM\n")
+                        append("  Utilization: $cpuStr (${Runtime.getRuntime().availableProcessors()} Cores)\n")
+                        append("  CPU Temp: $cpuTempStr  ·  Battery: $battStr\n\n")
+
+                        append("GPU & VULKAN\n")
+                        append("  Device: $devName\n")
+                        append("  Backend: $renderMode\n")
+                        append("  Textures: $texMb MB  ·  $tcMode\n\n")
+
+                        append("MEMORY & VIEWPORT\n")
+                        append("  App / System RAM: $ramStr\n")
+                        append("  Internal Render: ${resW}×${resH}  •  Refresh: ${refreshHz().roundToInt()} Hz\n")
+                    }
+                }
             }
             handler.postDelayed(this, 500)
         }
@@ -192,6 +350,7 @@ class GameActivity : AppCompatActivity(), NativeListener {
         Trail.clear(this)
         pads.setEnabled(prefs.gamepadEnabled)
         pads.refreshDevices()
+        startHardwareMonitor()
         handler.post(statsTick)
     }
 
@@ -247,20 +406,93 @@ class GameActivity : AppCompatActivity(), NativeListener {
             )
         )
 
+        hudContainer = FrameLayout(this)
+        hudContainer.visibility = if (prefs.showStats) View.VISIBLE else View.GONE
+
         statsText = TextView(this)
-        statsText.setTextColor(Color.argb(240, 224, 242, 254))
-        statsText.textSize = 10.5f
+        statsText.setTextColor(Color.argb(245, 224, 242, 254))
+        statsText.textSize = 10f
         statsText.typeface = Typeface.MONOSPACE
-        statsText.setPadding(pad(10), pad(3), pad(10), pad(3))
+        statsText.setPadding(pad(10), pad(4), pad(10), pad(4))
         val pillBg = GradientDrawable().apply {
-            setColor(Color.argb(200, 15, 23, 42))
+            setColor(Color.argb(215, 15, 23, 42))
             cornerRadius = pad(10).toFloat()
-            setStroke(pad(1), Color.argb(60, 148, 163, 184))
+            setStroke(pad(1), Color.argb(80, 56, 189, 248))
         }
         statsText.background = pillBg
-        statsText.visibility = if (prefs.showStats) View.VISIBLE else View.GONE
-        root.addView(
+        statsText.setOnClickListener {
+            hudIsExpanded = true
+            statsText.visibility = View.GONE
+            hudExpandedCard.visibility = View.VISIBLE
+        }
+        hudContainer.addView(
             statsText,
+            FrameLayout.LayoutParams(
+                ViewGroup.LayoutParams.WRAP_CONTENT, ViewGroup.LayoutParams.WRAP_CONTENT,
+                Gravity.TOP or Gravity.START,
+            )
+        )
+
+        hudExpandedCard = LinearLayout(this).apply {
+            orientation = LinearLayout.VERTICAL
+            val cardBg = GradientDrawable().apply {
+                setColor(Color.argb(235, 15, 23, 42))
+                cornerRadius = pad(12).toFloat()
+                setStroke(pad(1), Color.argb(120, 56, 189, 248))
+            }
+            background = cardBg
+            setPadding(pad(14), pad(10), pad(14), pad(10))
+            visibility = View.GONE
+            setOnClickListener {
+                hudIsExpanded = false
+                hudExpandedCard.visibility = View.GONE
+                statsText.visibility = View.VISIBLE
+            }
+        }
+
+        val hudHeader = LinearLayout(this).apply {
+            orientation = LinearLayout.HORIZONTAL
+            gravity = Gravity.CENTER_VERTICAL
+        }
+        val hudTitle = TextView(this).apply {
+            text = "MW2 ANDROID · PERFORMANCE"
+            setTextColor(Color.argb(255, 56, 189, 248))
+            textSize = 11f
+            typeface = Typeface.DEFAULT_BOLD
+        }
+        val hudCollapseBtn = TextView(this).apply {
+            text = "  [▲ Close]"
+            setTextColor(Color.argb(200, 148, 163, 184))
+            textSize = 10f
+            typeface = Typeface.MONOSPACE
+            setOnClickListener {
+                hudIsExpanded = false
+                hudExpandedCard.visibility = View.GONE
+                statsText.visibility = View.VISIBLE
+            }
+        }
+        hudHeader.addView(hudTitle, LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f))
+        hudHeader.addView(hudCollapseBtn, LinearLayout.LayoutParams(ViewGroup.LayoutParams.WRAP_CONTENT, ViewGroup.LayoutParams.WRAP_CONTENT))
+        hudExpandedCard.addView(hudHeader)
+
+        hudExpandedText = TextView(this).apply {
+            setTextColor(Color.argb(240, 226, 232, 240))
+            textSize = 9.5f
+            typeface = Typeface.MONOSPACE
+            setPadding(0, pad(6), 0, 0)
+        }
+        hudExpandedCard.addView(hudExpandedText)
+
+        hudContainer.addView(
+            hudExpandedCard,
+            FrameLayout.LayoutParams(
+                pad(320), ViewGroup.LayoutParams.WRAP_CONTENT,
+                Gravity.TOP or Gravity.START,
+            )
+        )
+
+        root.addView(
+            hudContainer,
             FrameLayout.LayoutParams(
                 ViewGroup.LayoutParams.WRAP_CONTENT, ViewGroup.LayoutParams.WRAP_CONTENT,
                 Gravity.TOP or Gravity.START,
@@ -398,7 +630,7 @@ class GameActivity : AppCompatActivity(), NativeListener {
 
     private fun setStats(on: Boolean) {
         prefs.showStats = on
-        statsText.visibility = if (on) View.VISIBLE else View.GONE
+        hudContainer.visibility = if (on) View.VISIBLE else View.GONE
     }
 
     private fun confirmQuit() {
@@ -648,6 +880,9 @@ class GameActivity : AppCompatActivity(), NativeListener {
 
     override fun onDestroy() {
         super.onDestroy()
+        monitoringActive = false
+        monitorThread?.interrupt()
+        monitorThread = null
         handler.removeCallbacksAndMessages(null)
         NativeBridge.listener = null
         if (started && !isChangingConfigurations) {

@@ -132,8 +132,11 @@ object NativeBridge {
 
     // ---- what the overlay shows --------------------------------------------
 
-    /** Fills [out] with { frames per second, texture MB, width, height }. */
+    /** Fills [out] with { frames per second, texture MB, width, height, frame time ms, presented frames }. */
     external fun nativeStats(out: FloatArray)
+
+    /** Returns formatted "Device|RendererMode|TextureCompression" */
+    external fun nativeRendererInfo(): String
 
     // ---- the button bits the guest expects ----------------------------------
     // XINPUT_GAMEPAD_*, as runtime/kernel/input.cpp reads them.

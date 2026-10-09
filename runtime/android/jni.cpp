@@ -20,6 +20,7 @@
 #include "../install/install.h"
 #include "../gpu/vulkan/presenter.h"
 #include "../gpu/vulkan/texture_cache.h"
+#include "../gpu/vulkan/pipeline.h"
 
 #include <android/native_window.h>
 #include <android/native_window_jni.h>
@@ -520,7 +521,9 @@ MW2_NATIVE(void, nativeCancelInstall)(JNIEnv*, jobject)
 
 MW2_NATIVE(void, nativeStats)(JNIEnv* env, jobject, jfloatArray out)
 {
-    if (!out || env->GetArrayLength(out) < 4) return;
+    if (!out) return;
+    const jsize len = env->GetArrayLength(out);
+    if (len < 4) return;
 
     const uint64_t presented = vk::PresentedFrames();
     const auto now = std::chrono::steady_clock::now();
@@ -546,13 +549,32 @@ MW2_NATIVE(void, nativeStats)(JNIEnv* env, jobject, jfloatArray out)
 
     uint32_t width = 0, height = 0;
     android::WindowSize(width, height);
-    jfloat values[4] = {
-        jfloat(g_fps),
-        jfloat(double(vk::textures::LiveBytes()) / (1024.0 * 1024.0)),
-        jfloat(width),
-        jfloat(height),
-    };
-    env->SetFloatArrayRegion(out, 0, 4, values);
+    std::vector<jfloat> values(len, 0.0f);
+    values[0] = jfloat(g_fps);
+    values[1] = jfloat(double(vk::textures::LiveBytes()) / (1024.0 * 1024.0));
+    values[2] = jfloat(width);
+    values[3] = jfloat(height);
+    if (len >= 5)
+    {
+        values[4] = g_fps > 0.01f ? jfloat(1000.0f / g_fps) : 0.0f;
+    }
+    if (len >= 6)
+    {
+        values[5] = jfloat(presented);
+    }
+    env->SetFloatArrayRegion(out, 0, len, values.data());
+}
+
+MW2_NATIVE(jstring, nativeRendererInfo)(JNIEnv* env, jobject)
+{
+    std::string info;
+    const char* dev = vk::pipeline::DeviceName();
+    info += (dev && dev[0]) ? dev : "Vulkan Device";
+    info += "|";
+    info += vk::pipeline::LegacyMode() ? "Legacy RenderPass (VK 1.1)" : "Dynamic Rendering (VK 1.3)";
+    info += "|";
+    info += vk::pipeline::TextureCompressionBC() ? "Hardware BC" : "CPU Decompress (Mali Fallback)";
+    return FromString(env, info);
 }
 
 // ---- the layer's own state ---------------------------------------------------
