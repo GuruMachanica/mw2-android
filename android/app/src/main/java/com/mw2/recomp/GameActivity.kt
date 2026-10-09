@@ -32,6 +32,7 @@ import android.os.SystemClock
 import java.io.File
 import java.util.Locale
 import android.widget.Button
+import android.widget.EditText
 import android.widget.FrameLayout
 import android.widget.LinearLayout
 import android.widget.SeekBar
@@ -483,7 +484,15 @@ class GameActivity : AppCompatActivity(), NativeListener {
                 statsText.visibility = View.VISIBLE
             }
         }
+        val hudConsoleBtn = TextView(this).apply {
+            text = " [⚡ CMD]"
+            setTextColor(Color.argb(230, 245, 158, 11))
+            textSize = 10f
+            typeface = Typeface.MONOSPACE
+            setOnClickListener { showConsoleDialog() }
+        }
         hudHeader.addView(hudTitle, LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f))
+        hudHeader.addView(hudConsoleBtn, LinearLayout.LayoutParams(ViewGroup.LayoutParams.WRAP_CONTENT, ViewGroup.LayoutParams.WRAP_CONTENT))
         hudHeader.addView(hudCollapseBtn, LinearLayout.LayoutParams(ViewGroup.LayoutParams.WRAP_CONTENT, ViewGroup.LayoutParams.WRAP_CONTENT))
         hudExpandedCard.addView(hudHeader)
 
@@ -535,6 +544,26 @@ class GameActivity : AppCompatActivity(), NativeListener {
         return button
     }
 
+    private fun showConsoleDialog() {
+        val input = EditText(this).apply {
+            hint = "e.g. god, give all, cg_drawFPS 1, map..."
+            setTextColor(Color.WHITE)
+            setHintTextColor(Color.GRAY)
+            setPadding(pad(16), pad(12), pad(16), pad(12))
+        }
+        AlertDialog.Builder(this)
+            .setTitle("IW4 Console Command")
+            .setView(input)
+            .setPositiveButton("Run") { _, _ ->
+                val cmd = input.text.toString().trim()
+                if (cmd.isNotEmpty()) {
+                    NativeBridge.nativeRunConsoleCommand(cmd)
+                }
+            }
+            .setNegativeButton(android.R.string.cancel, null)
+            .show()
+    }
+
     private fun pad(dp: Int): Int = (dp * resources.displayMetrics.density).roundToInt()
 
     private fun refreshHz(): Float {
@@ -574,6 +603,10 @@ class GameActivity : AppCompatActivity(), NativeListener {
         NativeBridge.nativeSetOption("MW2_FULLSCREEN", "1")
         NativeBridge.nativeSetOption("MW2_NO_AUDIO", if (prefs.audioEnabled) "" else "1")
         NativeBridge.nativeSetOption("MW2_NO_MSAA", if (prefs.multisampling) "" else "1")
+        if (prefs.renderScale in 1..3) {
+            NativeBridge.nativeSetOption("MW2_SCALE", prefs.renderScale.toString())
+        }
+        NativeBridge.nativeSetOption("MW2_STUTTERS", "1")
         NativeBridge.nativeSetOption(
             "MW2_TEXTURE_BUDGET_MB",
             if (prefs.textureBudgetMB > 0) prefs.textureBudgetMB.toString() else "",

@@ -56,7 +56,14 @@ namespace
     int16_t ToAxis(float value)
     {
         value = std::clamp(value, -1.0f, 1.0f);
-        return int16_t(std::lround(value * (value < 0 ? 32768.0f : 32767.0f)));
+        if (value == 0.0f) return 0;
+        // The console title has an internal thumbstick deadzone of ~14% (0.14f).
+        // Touch look should respond immediately to fine movements without requiring
+        // the finger to exceed a stick deadzone barrier.
+        constexpr float kDeadzone = 0.14f;
+        const float sign = value < 0.0f ? -1.0f : 1.0f;
+        const float boosted = sign * (kDeadzone + std::abs(value) * (1.0f - kDeadzone));
+        return int16_t(std::lround(boosted * (boosted < 0 ? 32768.0f : 32767.0f)));
     }
 
     // Converts what the finger did since the last call into a stick value.

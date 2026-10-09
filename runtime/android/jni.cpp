@@ -21,6 +21,7 @@
 #include "../gpu/vulkan/presenter.h"
 #include "../gpu/vulkan/texture_cache.h"
 #include "../gpu/vulkan/pipeline.h"
+#include "../console.h"
 
 #include <android/native_window.h>
 #include <android/native_window_jni.h>
@@ -575,6 +576,15 @@ MW2_NATIVE(jstring, nativeRendererInfo)(JNIEnv* env, jobject)
     info += "|";
     info += vk::pipeline::TextureCompressionBC() ? "Hardware BC" : "CPU Decompress (Mali Fallback)";
     return FromString(env, info);
+}
+
+MW2_NATIVE(void, nativeRunConsoleCommand)(JNIEnv* env, jobject, jstring command)
+{
+    const std::string text = ToString(env, command);
+    if (!text.empty())
+    {
+        console::RunNow(text.c_str());
+    }
 }
 
 // ---- the layer's own state ---------------------------------------------------

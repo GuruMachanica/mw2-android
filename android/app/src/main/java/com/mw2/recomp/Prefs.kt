@@ -27,6 +27,14 @@ class Prefs(context: Context) {
         get() = store.getFloat(KEY_RESOLUTION, 0f).let { if (it <= 0f) 0.7f else it }
         set(value) = store.edit().putFloat(KEY_RESOLUTION, value.coerceIn(0.35f, 1.0f)).apply()
 
+    /**
+     * Internal Vulkan render scale (MW2_SCALE):
+     * 1 = 720p native, 2 = 1440p Quad HD, 3 = 4K Ultra HD
+     */
+    var renderScale: Int
+        get() = store.getInt(KEY_RENDER_SCALE, 1).coerceIn(1, 3)
+        set(value) = store.edit().putInt(KEY_RENDER_SCALE, value.coerceIn(1, 3)).apply()
+
     /** Multisampling. Off by default: it is pure cost on a tiled GPU. */
     var multisampling: Boolean
         get() = store.getBoolean(KEY_MSAA, false)
@@ -137,6 +145,7 @@ class Prefs(context: Context) {
 
     companion object {
         private const val KEY_RESOLUTION = "resolutionScale"
+        private const val KEY_RENDER_SCALE = "renderScale"
         private const val KEY_MSAA = "multisampling"
         private const val KEY_TEXTURE_MB = "textureBudgetMB"
         private const val KEY_SHOW_STATS = "showStats"

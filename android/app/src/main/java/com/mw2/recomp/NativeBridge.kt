@@ -138,6 +138,9 @@ object NativeBridge {
     /** Returns formatted "Device|RendererMode|TextureCompression" */
     external fun nativeRendererInfo(): String
 
+    /** Feeds a console command into IW4 Cbuf_AddText queue (god, give all, map, etc.) */
+    external fun nativeRunConsoleCommand(command: String)
+
     // ---- the button bits the guest expects ----------------------------------
     // XINPUT_GAMEPAD_*, as runtime/kernel/input.cpp reads them.
     const val UP = 0x0001
