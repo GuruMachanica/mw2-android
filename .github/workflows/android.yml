@@ -67,7 +67,7 @@ permissions:
   contents: read
 
 env:
-  NDK_VERSION: "27.2.12479018"
+  NDK_VERSION: "28.2.13676358"
   CCACHE_DIR: ${{ github.workspace }}/.ccache
   CCACHE_BASEDIR: ${{ github.workspace }}
   CCACHE_MAXSIZE: 5G

@@ -1066,10 +1066,30 @@ namespace
         g.generation = android::WindowGeneration();
         g.nativeWindow = android::AcquireWindow();
         if (!g.nativeWindow) { LOGW("vulkan: no surface to present to"); return false; }
-        if (!CreateInstance()) return false;
-        if (!CreateSurfaceForWindow()) return false;
-        if (!PickDevice() || !CreateDevice() || !CreateSwapchain() || !CreateFrames())
+        if (!CreateInstance()) {
+            android::SetStatus("Failed to create Vulkan instance");
             return false;
+        }
+        if (!CreateSurfaceForWindow()) {
+            android::SetStatus("Failed to create Vulkan surface for Android window");
+            return false;
+        }
+        if (!PickDevice()) {
+            android::SetStatus("No Vulkan physical device found");
+            return false;
+        }
+        if (!CreateDevice()) {
+            android::SetStatus("GPU lacks Vulkan 1.3 or dynamic rendering support");
+            return false;
+        }
+        if (!CreateSwapchain()) {
+            android::SetStatus("Failed to create Vulkan swapchain");
+            return false;
+        }
+        if (!CreateFrames()) {
+            android::SetStatus("Failed to create Vulkan presentation frames");
+            return false;
+        }
         vk::pipeline::Initialise(g.device, g.physical, g.queue, g.queueFamily, g.instance);
         android::SetStatus((std::string("Running on ") + vk::pipeline::DeviceName()).c_str());
         return true;

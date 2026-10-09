@@ -628,7 +628,17 @@ class GameActivity : AppCompatActivity(), NativeListener {
 
     override fun onStatus(text: String) {
         handler.post {
-            if (!isFinishing && text.isNotEmpty() && prefs.showStats) {
+            if (isFinishing) return@post
+            if (text.startsWith("GPU lacks") || text.startsWith("Failed to") || text.startsWith("No Vulkan")) {
+                AlertDialog.Builder(this)
+                    .setTitle("Renderer Notice")
+                    .setMessage("$text\n\nYour device GPU does not provide Vulkan 1.3 or VK_KHR_dynamic_rendering. The game will run in headless mode without video output. Check the log for details.")
+                    .setPositiveButton("View Log") { _, _ ->
+                        finish()
+                    }
+                    .setNegativeButton("Continue Headless", null)
+                    .show()
+            } else if (text.isNotEmpty() && prefs.showStats) {
                 statsText.text = text
             }
         }

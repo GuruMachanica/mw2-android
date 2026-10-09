@@ -171,9 +171,15 @@ class MainActivity : AppCompatActivity() {
         )
     }
 
-    private fun device(): String =
-        "${android.os.Build.MANUFACTURER} ${android.os.Build.MODEL}, " +
+    private fun device(): String {
+        val vkVersion = packageManager.systemAvailableFeatures
+            .firstOrNull { it.name == "android.hardware.vulkan.version" }?.version ?: 0
+        val vkMajor = vkVersion shr 22
+        val vkMinor = (vkVersion shr 12) and 0x3ff
+        val vkStr = if (vkVersion > 0) "Vulkan $vkMajor.$vkMinor" else "No Vulkan"
+        return "${android.os.Build.MANUFACTURER} ${android.os.Build.MODEL} ($vkStr), " +
             "Android ${android.os.Build.VERSION.RELEASE}"
+    }
 
     /** A native call that must not take the launcher with it if it fails. */
     private fun <T> safely(fallback: T, call: () -> T): T = try {
