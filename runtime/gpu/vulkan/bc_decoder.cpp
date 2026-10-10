@@ -150,13 +150,52 @@ namespace vk::bc
         dst.minLevel = src.minLevel;
         dst.levels = src.levels;
 
+        if (src.bytesPerBlock == 0 || bpp == 0)
+        {
+            dst.ok = false;
+            dst.error = "invalid block size in texture decoding";
+            return false;
+        }
+
         std::vector<uint8_t> flat;
 
         for (gpu::TextureData::Level& level : dst.levels)
         {
-            const size_t at = (flat.size() + 15) & ~size_t(15);
+            if (level.width == 0 || level.height == 0)
+            {
+                dst.ok = false;
+                dst.error = "invalid zero dimension in texture level";
+                return false;
+            }
+
             const uint32_t numSlices = src.volume ? (level.depth ? level.depth : 1) : (level.layers ? level.layers : 1);
-            const size_t levelSize = size_t(level.width) * level.height * numSlices * bpp;
+            if (numSlices == 0)
+            {
+                dst.ok = false;
+                dst.error = "invalid zero slices in texture level";
+                return false;
+            }
+
+            const uint64_t totalBlocks = uint64_t(numSlices) * level.blocksHigh * level.blocksWide;
+            const uint64_t requiredBytes = totalBlocks * src.bytesPerBlock;
+            if (level.offset > src.bytes.size() || requiredBytes > (src.bytes.size() - level.offset))
+            {
+                dst.ok = false;
+                dst.error = "incomplete compressed texture data";
+                return false;
+            }
+
+            const uint64_t totalPixels = uint64_t(level.width) * level.height * numSlices;
+            const uint64_t levelSize64 = totalPixels * bpp;
+            if (levelSize64 > 0x40000000ULL)
+            {
+                dst.ok = false;
+                dst.error = "texture dimensions exceed maximum supported size";
+                return false;
+            }
+
+            const size_t at = (flat.size() + 15) & ~size_t(15);
+            const size_t levelSize = size_t(levelSize64);
             flat.resize(at + levelSize, 0);
 
             for (uint32_t layer = 0; layer < numSlices; layer++)
@@ -170,8 +209,6 @@ namespace vk::bc
                     {
                         const size_t blockIdx = (size_t(layer) * level.blocksHigh + by) * level.blocksWide + bx;
                         const size_t blockOffset = level.offset + blockIdx * src.bytesPerBlock;
-                        if (blockOffset + src.bytesPerBlock > src.bytes.size()) continue;
-
                         const uint8_t* block = src.bytes.data() + blockOffset;
 
                         if (xenosFormat == 18 || xenosFormat == 51) // BC1

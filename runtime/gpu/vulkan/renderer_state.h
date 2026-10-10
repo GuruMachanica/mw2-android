@@ -224,6 +224,7 @@ namespace vk::renderer::detail
 
     struct State
     {
+        bool ready = false;
         VkDevice device = VK_NULL_HANDLE;
         VkPhysicalDevice physical = VK_NULL_HANDLE;
         VkQueue queue = VK_NULL_HANDLE;

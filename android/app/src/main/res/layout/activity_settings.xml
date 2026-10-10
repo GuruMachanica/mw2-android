@@ -34,6 +34,23 @@
             android:layout_height="wrap_content"
             android:text="@string/resolution_hint" />
 
+        <TextView
+            android:id="@+id/render_scale_label"
+            style="@style/SettingLabel"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content" />
+
+        <SeekBar
+            android:id="@+id/render_scale"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content" />
+
+        <TextView
+            style="@style/SettingHint"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:text="@string/render_scale_hint" />
+
         <androidx.appcompat.widget.SwitchCompat
             android:id="@+id/msaa"
             style="@style/SettingSwitch"

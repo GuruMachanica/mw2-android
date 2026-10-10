@@ -22,17 +22,39 @@ namespace vk::renderer::detail
         info.usage = usage;
         info.sharingMode = VK_SHARING_MODE_EXCLUSIVE;
         info.initialLayout = VK_IMAGE_LAYOUT_UNDEFINED;
-        if (vkCreateImage(g.device, &info, nullptr, &target.image) != VK_SUCCESS) return false;
+        if (vkCreateImage(g.device, &info, nullptr, &target.image) != VK_SUCCESS)
+        {
+            target.image = VK_NULL_HANDLE;
+            return false;
+        }
 
         VkMemoryRequirements needs{};
         vkGetImageMemoryRequirements(g.device, target.image, &needs);
         const uint32_t type = FindMemory(needs.memoryTypeBits, VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT);
-        if (type == UINT32_MAX) return false;
+        if (type == UINT32_MAX)
+        {
+            vkDestroyImage(g.device, target.image, nullptr);
+            target.image = VK_NULL_HANDLE;
+            return false;
+        }
         VkMemoryAllocateInfo allocate{ VK_STRUCTURE_TYPE_MEMORY_ALLOCATE_INFO };
         allocate.allocationSize = needs.size;
         allocate.memoryTypeIndex = type;
-        if (vkAllocateMemory(g.device, &allocate, nullptr, &target.memory) != VK_SUCCESS) return false;
-        vkBindImageMemory(g.device, target.image, target.memory, 0);
+        if (vkAllocateMemory(g.device, &allocate, nullptr, &target.memory) != VK_SUCCESS)
+        {
+            vkDestroyImage(g.device, target.image, nullptr);
+            target.image = VK_NULL_HANDLE;
+            target.memory = VK_NULL_HANDLE;
+            return false;
+        }
+        if (vkBindImageMemory(g.device, target.image, target.memory, 0) != VK_SUCCESS)
+        {
+            vkFreeMemory(g.device, target.memory, nullptr);
+            vkDestroyImage(g.device, target.image, nullptr);
+            target.image = VK_NULL_HANDLE;
+            target.memory = VK_NULL_HANDLE;
+            return false;
+        }
 
         if (aspect)
         {
@@ -41,7 +63,15 @@ namespace vk::renderer::detail
             view.viewType = VK_IMAGE_VIEW_TYPE_2D;
             view.format = target.format;
             view.subresourceRange = { aspect, 0, 1, 0, 1 };
-            if (vkCreateImageView(g.device, &view, nullptr, &target.view) != VK_SUCCESS) return false;
+            if (vkCreateImageView(g.device, &view, nullptr, &target.view) != VK_SUCCESS)
+            {
+                target.view = VK_NULL_HANDLE;
+                vkFreeMemory(g.device, target.memory, nullptr);
+                vkDestroyImage(g.device, target.image, nullptr);
+                target.image = VK_NULL_HANDLE;
+                target.memory = VK_NULL_HANDLE;
+                return false;
+            }
         }
         return true;
     }

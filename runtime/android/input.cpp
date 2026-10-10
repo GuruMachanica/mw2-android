@@ -56,13 +56,19 @@ namespace
     int16_t ToAxis(float value)
     {
         value = std::clamp(value, -1.0f, 1.0f);
-        if (value == 0.0f) return 0;
+        constexpr float kMinThreshold = 0.015f;
+        const float absVal = std::abs(value);
+        if (absVal < kMinThreshold) return 0;
+
         // The console title has an internal thumbstick deadzone of ~14% (0.14f).
         // Touch look should respond immediately to fine movements without requiring
         // the finger to exceed a stick deadzone barrier.
+        // Remap from [kMinThreshold, 1.0f] to [0.0f, 1.0f] so near-zero residuals do
+        // not snap to full minimum deflection.
         constexpr float kDeadzone = 0.14f;
         const float sign = value < 0.0f ? -1.0f : 1.0f;
-        const float boosted = sign * (kDeadzone + std::abs(value) * (1.0f - kDeadzone));
+        const float normalized = (absVal - kMinThreshold) / (1.0f - kMinThreshold);
+        const float boosted = sign * (kDeadzone + normalized * (1.0f - kDeadzone));
         return int16_t(std::lround(boosted * (boosted < 0 ? 32768.0f : 32767.0f)));
     }
 
@@ -86,19 +92,26 @@ namespace
             const double speedY = g_lookAccumY / elapsed;
             g_lookAccumX = g_lookAccumY = 0;
 
-            const float saturation = std::max(g_saturation, 100.0f);
-            float x = float(speedX) * g_sensitivityX / saturation;
-            float y = float(speedY) * g_sensitivityY / saturation;
-            // A finger that has been lifted centres the stick at once rather
-            // than drifting to zero.
-            if (!g_lookActive) x = y = 0;
-            // Smoothing takes the stairs out of a finger reported at 120 Hz
-            // against a title polling at 60; too much of it feels like ice.
-            const float keep = std::clamp(g_smoothing, 0.0f, 0.9f);
-            g_lookValueX = g_lookValueX * keep + std::clamp(x, -1.0f, 1.0f) * (1.0f - keep);
-            g_lookValueY = g_lookValueY * keep + std::clamp(y, -1.0f, 1.0f) * (1.0f - keep);
-            if (std::fabs(g_lookValueX) < 0.002f) g_lookValueX = 0;
-            if (std::fabs(g_lookValueY) < 0.002f) g_lookValueY = 0;
+            if (!g_lookActive)
+            {
+                // A finger that has been lifted centres the stick immediately
+                // rather than decaying through smoothing.
+                g_lookValueX = 0.0f;
+                g_lookValueY = 0.0f;
+            }
+            else
+            {
+                const float saturation = std::max(g_saturation, 100.0f);
+                float x = float(speedX) * g_sensitivityX / saturation;
+                float y = float(speedY) * g_sensitivityY / saturation;
+                // Smoothing takes the stairs out of a finger reported at 120 Hz
+                // against a title polling at 60; too much of it feels like ice.
+                const float keep = std::clamp(g_smoothing, 0.0f, 0.9f);
+                g_lookValueX = g_lookValueX * keep + std::clamp(x, -1.0f, 1.0f) * (1.0f - keep);
+                g_lookValueY = g_lookValueY * keep + std::clamp(y, -1.0f, 1.0f) * (1.0f - keep);
+                if (std::fabs(g_lookValueX) < 0.002f) g_lookValueX = 0;
+                if (std::fabs(g_lookValueY) < 0.002f) g_lookValueY = 0;
+            }
         }
 
         if (g_lookValueX == 0 && g_lookValueY == 0) return;

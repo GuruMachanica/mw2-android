@@ -38,16 +38,94 @@ namespace vk::renderer::detail
 
 using namespace vk::renderer::detail;
 
+static void RollbackInitialise()
+{
+    if (!g.device) return;
+    for (uint32_t i = 0; i < kPresentImages; i++)
+    {
+        if (g.present[i]) vkDestroyImage(g.device, g.present[i], nullptr);
+        if (g.presentMemory[i]) vkFreeMemory(g.device, g.presentMemory[i], nullptr);
+        g.present[i] = VK_NULL_HANDLE;
+        g.presentMemory[i] = VK_NULL_HANDLE;
+    }
+    if (g.descriptors)
+    {
+        vkDestroyDescriptorPool(g.device, g.descriptors, nullptr);
+        g.descriptors = VK_NULL_HANDLE;
+    }
+    g.constantSet = VK_NULL_HANDLE;
+    g.memorySet = VK_NULL_HANDLE;
+
+    gpu::watch::SetShadow(nullptr, 0);
+    g.shadowBase = 0;
+    if (g.arenaMapped)
+    {
+        vkUnmapMemory(g.device, g.arenaMemory);
+        g.arenaMapped = nullptr;
+    }
+    if (g.arena)
+    {
+        vkDestroyBuffer(g.device, g.arena, nullptr);
+        g.arena = VK_NULL_HANDLE;
+    }
+    if (g.arenaMemory)
+    {
+        vkFreeMemory(g.device, g.arenaMemory, nullptr);
+        g.arenaMemory = VK_NULL_HANDLE;
+    }
+    g.arenaBytes = 0;
+
+    if (g.setupFence)
+    {
+        vkDestroyFence(g.device, g.setupFence, nullptr);
+        g.setupFence = VK_NULL_HANDLE;
+    }
+    for (State::Slot& slot : g.slots)
+    {
+        if (slot.fence)
+        {
+            vkDestroyFence(g.device, slot.fence, nullptr);
+            slot.fence = VK_NULL_HANDLE;
+        }
+    }
+    if (g.guestQueries)
+    {
+        vkDestroyQueryPool(g.device, g.guestQueries, nullptr);
+        g.guestQueries = VK_NULL_HANDLE;
+    }
+    if (g.setupCommands)
+    {
+        vkDestroyCommandPool(g.device, g.setupCommands, nullptr);
+        g.setupCommands = VK_NULL_HANDLE;
+    }
+    g.setup = VK_NULL_HANDLE;
+    for (State::Slot& slot : g.slots)
+    {
+        if (slot.commands)
+        {
+            vkDestroyCommandPool(g.device, slot.commands, nullptr);
+            slot.commands = VK_NULL_HANDLE;
+        }
+        slot = State::Slot{};
+    }
+    g.depthFormat = VK_FORMAT_UNDEFINED;
+    g.command = VK_NULL_HANDLE;
+    g.ready = false;
+    g.device = VK_NULL_HANDLE;
+    g.physical = VK_NULL_HANDLE;
+    g.queue = VK_NULL_HANDLE;
+}
+
 bool vk::renderer::Initialise()
 {
-    if (g.device) return true;
+    if (g.ready) return true;
     if (!vk::pipeline::Ready() && !vk::pipeline::Initialise()) return false;
 
     g.device = static_cast<VkDevice>(vk::pipeline::Device());
     g.physical = static_cast<VkPhysicalDevice>(vk::pipeline::PhysicalDevice());
     g.queue = static_cast<VkQueue>(vk::pipeline::Queue());
-    if (!g.device || !g.queue) { g.device = VK_NULL_HANDLE; return false; }
-    if (!vk::textures::Initialise()) { g.device = VK_NULL_HANDLE; return false; }
+    if (!g.device || !g.queue) { RollbackInitialise(); return false; }
+    if (!vk::textures::Initialise()) { RollbackInitialise(); return false; }
 
     vkGetPhysicalDeviceMemoryProperties(g.physical, &g.memory);
     VkPhysicalDeviceProperties properties{};
@@ -68,7 +146,7 @@ bool vk::renderer::Initialise()
             break;
         }
     }
-    if (g.depthFormat == VK_FORMAT_UNDEFINED) { LOGW("renderer: no depth format"); return false; }
+    if (g.depthFormat == VK_FORMAT_UNDEFINED) { LOGW("renderer: no depth format"); RollbackInitialise(); return false; }
 
     // The console's 2x and 4x surfaces are drawn with that many samples unless
     // MW2_NO_MSAA=1. A count is usable when colour, depth and stencil can all
@@ -132,20 +210,36 @@ bool vk::renderer::Initialise()
     // A pool each, because a slot is reset on its own while the others are busy.
     for (State::Slot& slot : g.slots)
     {
-        if (vkCreateCommandPool(g.device, &pool, nullptr, &slot.commands) != VK_SUCCESS) return false;
+        if (vkCreateCommandPool(g.device, &pool, nullptr, &slot.commands) != VK_SUCCESS)
+        {
+            RollbackInitialise();
+            return false;
+        }
         allocate.commandPool = slot.commands;
         allocate.commandBufferCount = kSegmentBuffers;
         slot.buffers.resize(kSegmentBuffers);
-        if (vkAllocateCommandBuffers(g.device, &allocate, slot.buffers.data()) != VK_SUCCESS) return false;
+        if (vkAllocateCommandBuffers(g.device, &allocate, slot.buffers.data()) != VK_SUCCESS)
+        {
+            RollbackInitialise();
+            return false;
+        }
         allocate.commandBufferCount = 1;
     }
 
     VkCommandPoolCreateInfo setupPool{ VK_STRUCTURE_TYPE_COMMAND_POOL_CREATE_INFO };
     setupPool.flags = VK_COMMAND_POOL_CREATE_RESET_COMMAND_BUFFER_BIT;
     setupPool.queueFamilyIndex = vk::pipeline::QueueFamily();
-    if (vkCreateCommandPool(g.device, &setupPool, nullptr, &g.setupCommands) != VK_SUCCESS) return false;
+    if (vkCreateCommandPool(g.device, &setupPool, nullptr, &g.setupCommands) != VK_SUCCESS)
+    {
+        RollbackInitialise();
+        return false;
+    }
     allocate.commandPool = g.setupCommands;
-    if (vkAllocateCommandBuffers(g.device, &allocate, &g.setup) != VK_SUCCESS) return false;
+    if (vkAllocateCommandBuffers(g.device, &allocate, &g.setup) != VK_SUCCESS)
+    {
+        RollbackInitialise();
+        return false;
+    }
 
     VkQueryPoolCreateInfo queries{ VK_STRUCTURE_TYPE_QUERY_POOL_CREATE_INFO };
     queries.queryType = VK_QUERY_TYPE_OCCLUSION;
@@ -155,8 +249,16 @@ bool vk::renderer::Initialise()
 
     VkFenceCreateInfo fence{ VK_STRUCTURE_TYPE_FENCE_CREATE_INFO };
     for (State::Slot& slot : g.slots)
-        if (vkCreateFence(g.device, &fence, nullptr, &slot.fence) != VK_SUCCESS) return false;
-    if (vkCreateFence(g.device, &fence, nullptr, &g.setupFence) != VK_SUCCESS) return false;
+        if (vkCreateFence(g.device, &fence, nullptr, &slot.fence) != VK_SUCCESS)
+        {
+            RollbackInitialise();
+            return false;
+        }
+    if (vkCreateFence(g.device, &fence, nullptr, &g.setupFence) != VK_SUCCESS)
+    {
+        RollbackInitialise();
+        return false;
+    }
 
     // Constants, vertex data and indices all live in the arena, which is why
     // it carries every usage at once.
@@ -185,7 +287,7 @@ bool vk::renderer::Initialise()
         const uint32_t type = FindMemory(needs.memoryTypeBits,
                                          VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT |
                                          VK_MEMORY_PROPERTY_HOST_COHERENT_BIT);
-        if (type == UINT32_MAX) { LOGW("renderer: no host-visible memory"); return false; }
+        if (type == UINT32_MAX) { LOGW("renderer: no host-visible memory"); RollbackInitialise(); return false; }
         VkMemoryAllocateInfo allocateArena{ VK_STRUCTURE_TYPE_MEMORY_ALLOCATE_INFO };
         allocateArena.allocationSize = needs.size;
         allocateArena.memoryTypeIndex = type;
@@ -207,7 +309,7 @@ bool vk::renderer::Initialise()
         g.arenaMemory = VK_NULL_HANDLE;
         g.arena = VK_NULL_HANDLE;
     }
-    if (!g.arenaBytes) { LOGW("renderer: no frame arena"); return false; }
+    if (!g.arenaBytes) { LOGW("renderer: no frame arena"); RollbackInitialise(); return false; }
 
     // A slot's share has to hold everything one submission copies -- a frame's
     // is about 50 MB here against the 512 MB asked for, so three shares fit with
@@ -248,6 +350,7 @@ bool vk::renderer::Initialise()
         if (!vk::pipeline::LegacyMode())
         {
             LOGW("renderer: the device did not give dynamic rendering or dynamic state commands");
+            RollbackInitialise();
             return false;
         }
         LOGI("renderer: running in legacy mode without dynamic rendering / dynamic state commands");
@@ -263,7 +366,10 @@ bool vk::renderer::Initialise()
     descriptors.poolSizeCount = 2;
     descriptors.pPoolSizes = sizes;
     if (vkCreateDescriptorPool(g.device, &descriptors, nullptr, &g.descriptors) != VK_SUCCESS)
+    {
+        RollbackInitialise();
         return false;
+    }
 
     VkDescriptorSetLayout constantLayout =
         static_cast<VkDescriptorSetLayout>(vk::pipeline::SetLayout(bindings::kConstantSet));
@@ -273,9 +379,17 @@ bool vk::renderer::Initialise()
     allocateSet.descriptorPool = g.descriptors;
     allocateSet.descriptorSetCount = 1;
     allocateSet.pSetLayouts = &constantLayout;
-    if (vkAllocateDescriptorSets(g.device, &allocateSet, &g.constantSet) != VK_SUCCESS) return false;
+    if (vkAllocateDescriptorSets(g.device, &allocateSet, &g.constantSet) != VK_SUCCESS)
+    {
+        RollbackInitialise();
+        return false;
+    }
     allocateSet.pSetLayouts = &memoryLayout;
-    if (vkAllocateDescriptorSets(g.device, &allocateSet, &g.memorySet) != VK_SUCCESS) return false;
+    if (vkAllocateDescriptorSets(g.device, &allocateSet, &g.memorySet) != VK_SUCCESS)
+    {
+        RollbackInitialise();
+        return false;
+    }
 
     // Dynamic views into the arena; their ranges are the block sizes, and
     // every draw supplies its own offsets.
@@ -310,7 +424,10 @@ bool vk::renderer::Initialise()
         // STORAGE so the display's colour table can be applied to it in place.
         if (!MakeImage(image, VK_IMAGE_USAGE_TRANSFER_DST_BIT | VK_IMAGE_USAGE_TRANSFER_SRC_BIT |
                               VK_IMAGE_USAGE_STORAGE_BIT, 0))
+        {
+            RollbackInitialise();
             return false;
+        }
         g.present[i] = image.image;
         g.presentMemory[i] = image.memory;
     }
@@ -323,12 +440,14 @@ bool vk::renderer::Initialise()
     // A lost device ends the run, the way closing the window does.
     vk::pipeline::OnDeviceLost(crash::RequestExit);
     vk::record::Start();
+    g.ready = true;
     return true;
 }
 
 void vk::renderer::Shutdown()
 {
     if (!g.device) return;
+    g.ready = false;
     // Before anything is destroyed, the display table's pipeline included: the
     // last frames are still on the GPU, and they use it -- and the last
     // commands may still be with the recorder thread.
@@ -408,6 +527,6 @@ void vk::renderer::Shutdown()
     g.device = VK_NULL_HANDLE;
 }
 
-bool vk::renderer::Ready() { return g.device != VK_NULL_HANDLE; }
+bool vk::renderer::Ready() { return g.ready; }
 
 #endif  // MW2_HAVE_VULKAN

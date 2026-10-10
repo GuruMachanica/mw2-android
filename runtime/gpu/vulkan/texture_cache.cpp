@@ -349,6 +349,8 @@ namespace
         return true;
     }
 
+    void DestroyImage(Image& image);
+
     bool MakeImage(Image& out, const char** error)
     {
         // Made by hand rather than read from a fetch constant: all of it is the
@@ -398,11 +400,24 @@ namespace
         vkGetImageMemoryRequirements(g.device, out.image, &needs);
         const uint32_t type = vk::util::FindMemory(g.memory, needs.memoryTypeBits,
                                                    VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT);
-        if (type == UINT32_MAX) return Fail("no device-local memory", error);
+        if (type == UINT32_MAX)
+        {
+            DestroyImage(out);
+            return Fail("no device-local memory", error);
+        }
 
         out.memory = vk::imagememory::Allocate(g.device, needs, type);
-        if (!out.memory) return Fail(Explain(VK_ERROR_OUT_OF_DEVICE_MEMORY), error);
-        vkBindImageMemory(g.device, out.image, out.memory.memory, out.memory.offset);
+        if (!out.memory)
+        {
+            DestroyImage(out);
+            return Fail(Explain(VK_ERROR_OUT_OF_DEVICE_MEMORY), error);
+        }
+        r = vkBindImageMemory(g.device, out.image, out.memory.memory, out.memory.offset);
+        if (r != VK_SUCCESS)
+        {
+            DestroyImage(out);
+            return Fail(Explain(r), error);
+        }
 
         VkImageViewCreateInfo view{ VK_STRUCTURE_TYPE_IMAGE_VIEW_CREATE_INFO };
         view.image = out.image;
@@ -435,7 +450,11 @@ namespace
         view.subresourceRange = { VK_IMAGE_ASPECT_COLOR_BIT, 0, VK_REMAINING_MIP_LEVELS, 0,
                                   out.volume ? 1u : out.layers };
         r = vkCreateImageView(g.device, &view, nullptr, &out.view);
-        if (r != VK_SUCCESS) return Fail(Explain(r), error);
+        if (r != VK_SUCCESS)
+        {
+            DestroyImage(out);
+            return Fail(Explain(r), error);
+        }
         return true;
     }
 

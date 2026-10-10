@@ -28,8 +28,8 @@ class Prefs(context: Context) {
         set(value) = store.edit().putFloat(KEY_RESOLUTION, value.coerceIn(0.35f, 1.0f)).apply()
 
     /**
-     * Internal Vulkan render scale (MW2_SCALE):
-     * 1 = 720p native, 2 = 1440p Quad HD, 3 = 4K Ultra HD
+     * Internal Vulkan render scale multiplier (MW2_SCALE):
+     * 1 = 1x native base dimensions, 2 = 2x multiplier, 3 = 3x multiplier.
      */
     var renderScale: Int
         get() = store.getInt(KEY_RENDER_SCALE, 1).coerceIn(1, 3)

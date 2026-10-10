@@ -37,6 +37,18 @@ class SettingsActivity : AppCompatActivity() {
             }
         })
 
+        val renderScaleLabel: TextView = findViewById(R.id.render_scale_label)
+        val renderScale: SeekBar = findViewById(R.id.render_scale)
+        renderScale.max = 2 // 0 = 1x, 1 = 2x, 2 = 3x
+        renderScale.progress = (prefs.renderScale - 1).coerceIn(0, 2)
+        renderScaleLabel.text = getString(R.string.render_scale, renderScale.progress + 1)
+        renderScale.setOnSeekBarChangeListener(object : Simple() {
+            override fun onProgressChanged(bar: SeekBar, value: Int, fromUser: Boolean) {
+                renderScaleLabel.text = getString(R.string.render_scale, value + 1)
+                if (fromUser) prefs.renderScale = value + 1
+            }
+        })
+
         switch(R.id.msaa, prefs.multisampling) { prefs.multisampling = it }
         switch(R.id.prefer60, prefs.prefer60Hz) { prefs.prefer60Hz = it }
         switch(R.id.stats, prefs.showStats) { prefs.showStats = it }
