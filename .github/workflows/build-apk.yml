@@ -87,6 +87,8 @@ jobs:
         env:
           MW2_NDK_VERSION: ${{ env.NDK_VERSION }}
           MW2_BUILD_SHA: ${{ github.sha }}
+          MW2_XEX_SHA256_SP: "990e640d3a92544f9d585e71faf1ab65082d37ec6f5865b2599335fa123bf6ff"
+          MW2_XEX_SHA256_MP: "aacc47aff3221f3bd9129e80827fd3bcd74aa43bf74bb5c5ddbd0597c0d5fcde"
         run: |
           case "${{ github.event.inputs.build_type || 'release' }}" in
             debug)   task="assembleCampaignDebug" ;;

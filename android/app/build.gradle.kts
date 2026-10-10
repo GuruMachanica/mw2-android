@@ -81,11 +81,9 @@ android {
                         "-DCMAKE_CXX_COMPILER_LAUNCHER=$it",
                     )
                 }
-                val sp = setting("MW2_XEX_SHA256_SP")
-                val mp = setting("MW2_XEX_SHA256_MP")
-                if (sp != null && mp != null) {
-                    arguments += listOf("-DMW2_XEX_SHA256_SP=$sp", "-DMW2_XEX_SHA256_MP=$mp")
-                }
+                val sp = setting("MW2_XEX_SHA256_SP") ?: "990e640d3a92544f9d585e71faf1ab65082d37ec6f5865b2599335fa123bf6ff"
+                val mp = setting("MW2_XEX_SHA256_MP") ?: "aacc47aff3221f3bd9129e80827fd3bcd74aa43bf74bb5c5ddbd0597c0d5fcde"
+                arguments += listOf("-DMW2_XEX_SHA256_SP=$sp", "-DMW2_XEX_SHA256_MP=$mp")
                 cppFlags += (setting("MW2_NATIVE_OPTIMISATION") ?: "-O3")
             }
         }
