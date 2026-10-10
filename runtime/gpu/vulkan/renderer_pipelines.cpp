@@ -1,6 +1,7 @@
 // Translated shaders, the pipelines built from them, and the shader cache that
 // rebuilds a previous run's pipelines before the title asks for them.
 #include "renderer_state.h"
+#include "../internal.h"
 #include "../../diagnostics.h"
 #include "../../log.h"
 #include "../../report.h"
@@ -163,8 +164,12 @@ namespace vk::renderer::detail
         // Xenos has no fixed-function vertex input at all: the shader fetches its
         // own attributes out of set 2.
         assembly.topology = VkPrimitiveTopology(key.topology);
+        static constexpr VkViewport kDummyViewport{ 0.0f, 0.0f, 1.0f, 1.0f, 0.0f, 1.0f };
+        static constexpr VkRect2D kDummyScissor{ {0, 0}, {1, 1} };
         viewport.viewportCount = 1;
         viewport.scissorCount = 1;
+        viewport.pViewports = &kDummyViewport;
+        viewport.pScissors = &kDummyScissor;
 
         raster.polygonMode = VK_POLYGON_MODE_FILL;
         // Culling and winding are set per draw (FacesFor).
@@ -269,10 +274,22 @@ namespace vk::renderer::detail
         const PipelineState state(key);
         VkGraphicsPipelineCreateInfo info{ VK_STRUCTURE_TYPE_GRAPHICS_PIPELINE_CREATE_INFO };
         info.pNext = vk::pipeline::LegacyMode() ? nullptr : &state.rendering;
-        info.renderPass = vk::pipeline::LegacyMode()
+
+        gpu::detail::SetCurrentDrawStage("Draw_EnsurePipeline_GetRenderPass");
+        VkRenderPass renderPass = vk::pipeline::LegacyMode()
             ? GetRenderPass(VkFormat(key.colourFormat), VkFormat(key.depthFormat),
                             VkSampleCountFlagBits(std::max(key.samples, 1u)))
             : VK_NULL_HANDLE;
+
+        if (vk::pipeline::LegacyMode() && !renderPass)
+        {
+            LOGE("renderer: legacy mode has no renderPass for pipeline %016llX/%016llX (c=%d, d=%d, s=%u)",
+                 (unsigned long long)key.vertexShader, (unsigned long long)key.pixelShader,
+                 key.colourFormat, key.depthFormat, key.samples);
+            return VK_NULL_HANDLE;
+        }
+
+        info.renderPass = renderPass;
         info.subpass = 0;
         info.stageCount = 2;
         info.pStages = stages;
@@ -282,19 +299,30 @@ namespace vk::renderer::detail
         info.pRasterizationState = &state.raster;
         info.pMultisampleState = &state.multisample;
         info.pDepthStencilState = (key.depthFormat != VK_FORMAT_UNDEFINED) ? &state.depth : nullptr;
-        info.pColorBlendState = &state.blending;
+        info.pColorBlendState = (key.colourFormat != VK_FORMAT_UNDEFINED) ? &state.blending : nullptr;
         info.pDynamicState = &state.dynamic;
         info.layout = static_cast<VkPipelineLayout>(vk::pipeline::Layout());
+
+        gpu::detail::SetCurrentDrawStage("Draw_EnsurePipeline_vkCreateGraphicsPipelines");
+        const auto compileStart = std::chrono::steady_clock::now();
+        LOGI("renderer: building pipeline %016llX/%016llX (c=%d, d=%d, topo=%u, samples=%u, pass=%p)...",
+             (unsigned long long)key.vertexShader, (unsigned long long)key.pixelShader,
+             key.colourFormat, key.depthFormat, key.topology, key.samples, (void*)renderPass);
 
         VkPipeline built = VK_NULL_HANDLE;
         VkResult res = vkCreateGraphicsPipelines(g.device, static_cast<VkPipelineCache>(vk::pipeline::Cache()),
                                                 1, &info, nullptr, &built);
+        const uint64_t tookMs = uint64_t(std::chrono::duration_cast<std::chrono::milliseconds>(
+            std::chrono::steady_clock::now() - compileStart).count());
         if (res != VK_SUCCESS)
         {
-            LOGE("renderer: vkCreateGraphicsPipelines failed: %d (colour=%d, depth=%d, topo=%u, samples=%u)",
-                 res, key.colourFormat, key.depthFormat, key.topology, key.samples);
+            LOGE("renderer: vkCreateGraphicsPipelines failed: %d (colour=%d, depth=%d, topo=%u, samples=%u) in %llu ms",
+                 res, key.colourFormat, key.depthFormat, key.topology, key.samples, (unsigned long long)tookMs);
             return VK_NULL_HANDLE;
         }
+        LOGI("renderer: built pipeline %016llX/%016llX in %llu ms (handle=%p)",
+             (unsigned long long)key.vertexShader, (unsigned long long)key.pixelShader,
+             (unsigned long long)tookMs, (void*)built);
         return built;
     }
 

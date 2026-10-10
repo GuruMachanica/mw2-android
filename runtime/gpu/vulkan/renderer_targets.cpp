@@ -496,8 +496,13 @@ namespace vk::renderer::detail
         info.pSubpasses = &subpass;
 
         VkRenderPass pass = VK_NULL_HANDLE;
-        if (vkCreateRenderPass(g.device, &info, nullptr, &pass) != VK_SUCCESS)
+        VkResult r = vkCreateRenderPass(g.device, &info, nullptr, &pass);
+        if (r != VK_SUCCESS)
+        {
+            LOGE("renderer: vkCreateRenderPass failed: %d (colour=%d, depth=%d, samples=%d)",
+                 r, colourFormat, depthFormat, samples);
             return VK_NULL_HANDLE;
+        }
 
         g.legacyRenderPasses[key] = pass;
         return pass;

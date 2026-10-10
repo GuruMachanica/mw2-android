@@ -226,7 +226,9 @@ namespace
         // a driver that has them in core rather than as extensions can only
         // be asked for them by an application that says it targets 1.3.
         app.apiVersion = VK_API_VERSION_1_2;
+#if defined(MW2_VULKAN_DYNAMIC)
         if (vkEnumerateInstanceVersion)
+#endif
         {
             uint32_t available = 0;
             if (vkEnumerateInstanceVersion(&available) == VK_SUCCESS &&

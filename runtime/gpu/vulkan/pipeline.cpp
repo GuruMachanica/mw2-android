@@ -355,7 +355,9 @@ namespace
         // a driver that has them in core rather than as extensions can only
         // be asked for them by an application that says it targets 1.3.
         app.apiVersion = VK_API_VERSION_1_2;
+#if defined(MW2_VULKAN_DYNAMIC)
         if (vkEnumerateInstanceVersion)
+#endif
         {
             uint32_t available = 0;
             if (vkEnumerateInstanceVersion(&available) == VK_SUCCESS &&
@@ -487,6 +489,7 @@ namespace
     {
         static std::string pathStr;
         if (!pathStr.empty()) return pathStr.c_str();
+        if (env::Flag("MW2_NO_PIPELINE_CACHE")) return nullptr;
 #ifdef MW2_ANDROID
         if (!android::GetPaths().cache.empty())
         {
@@ -655,7 +658,11 @@ bool     vk::pipeline::TextureCompressionBC() { return g.textureCompressionBC; }
 std::mutex& vk::pipeline::QueueMutex() { static std::mutex m; return m; }
 void*    vk::pipeline::SetLayout(uint32_t set) { return set < 3 ? g.sets[set] : nullptr; }
 void*    vk::pipeline::Layout() { return g.layout; }
-void*    vk::pipeline::Cache() { return g.cache; }
+void*    vk::pipeline::Cache()
+{
+    static const bool noCache = env::Flag("MW2_NO_PIPELINE_CACHE");
+    return noCache ? nullptr : g.cache;
+}
 void     vk::pipeline::SaveCache() { ::SaveCache(); }
 
 bool vk::pipeline::CreateModule(const uint32_t* spirv, size_t words, const char** error)
