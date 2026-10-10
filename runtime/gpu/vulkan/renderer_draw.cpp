@@ -310,9 +310,13 @@ void vk::renderer::Draw(const gpu::RegisterFile& r, const DrawCall& call)
     // A surface has a pitch but no height: how tall it is only shows in the region
     // the draws cover. Clamped, because a scissor left at its reset value asks for
     // a target taller than any display.
-    const uint32_t width = std::min(usePitch, 4096u);
+    const uint32_t maxTiles = (2048u > colour.BaseTile()) ? (2048u - colour.BaseTile()) : 0u;
+    const uint32_t tilesPerRow = (usePitch + 79u) / 80u;
+    const uint32_t maxEdramLines = tilesPerRow ? ((maxTiles / tilesPerRow) * 16u) : 2048u;
+    const uint32_t maxAllowedHeight = std::min(2048u, std::max(32u, maxEdramLines));
+    const uint32_t width = std::min(usePitch, 2048u);
     const uint32_t height = std::clamp(uint32_t(scissor.offset.y) + scissor.extent.height,
-                                       32u, 4096u);
+                                       32u, maxAllowedHeight);
 
     Target* colourTarget = EnsureTarget({ colour.BaseTile(), usePitch,
                                           uint32_t(ColourFormatFor(colour.Format())),
@@ -582,6 +586,23 @@ void vk::renderer::Draw(const gpu::RegisterFile& r, const DrawCall& call)
     viewport.width *= float(g.scale);
     viewport.height *= float(g.scale);
     scissor = { Scaled(scissor.offset), Scaled(scissor.extent) };
+    if (g.currentWidth && g.currentHeight)
+    {
+        scissor.offset.x = std::max(0, scissor.offset.x);
+        scissor.offset.y = std::max(0, scissor.offset.y);
+        const int32_t maxX = int32_t(g.currentWidth * g.scale);
+        const int32_t maxY = int32_t(g.currentHeight * g.scale);
+        if (scissor.offset.x >= maxX || scissor.offset.y >= maxY)
+        {
+            scissor.offset = { 0, 0 };
+            scissor.extent = { 0, 0 };
+        }
+        else
+        {
+            scissor.extent.width = std::min(scissor.extent.width, uint32_t(maxX - scissor.offset.x));
+            scissor.extent.height = std::min(scissor.extent.height, uint32_t(maxY - scissor.offset.y));
+        }
+    }
 
     if (g.scale > 1 && (!bound.scaledValid || bound.scaled != scaledSlots))
     {

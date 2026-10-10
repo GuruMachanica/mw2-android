@@ -228,8 +228,13 @@ namespace vk::renderer::detail
         Stopwatch waited(g.fenceNanoseconds);
         stutters::Timed timed(stutters::kGpuWaits);
         vk::record::WaitFor(slot.queuedAt);
-        if (vk::pipeline::Failed(vkWaitForFences(g.device, 1, &slot.fence, VK_TRUE, UINT64_MAX),
-                                 what))
+        VkResult res = vkWaitForFences(g.device, 1, &slot.fence, VK_TRUE, 2000000000ull);
+        if (res == VK_TIMEOUT)
+        {
+            LOGW("renderer: waiting for %s took >2 seconds; continuing wait...", what);
+            res = vkWaitForFences(g.device, 1, &slot.fence, VK_TRUE, UINT64_MAX);
+        }
+        if (vk::pipeline::Failed(res, what))
             return false;
         slot.inFlight = false;
         return true;

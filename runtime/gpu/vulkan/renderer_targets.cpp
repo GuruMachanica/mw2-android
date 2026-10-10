@@ -363,6 +363,8 @@ namespace vk::renderer::detail
     Target* EnsureTarget(const TargetKey& key, uint32_t width, uint32_t height,
                          uint32_t guestFormat)
     {
+        width = std::min(width, 2048u);
+        height = std::min(height, 2048u);
         auto found = g.targets.find(key);
         if (found != g.targets.end() &&
             found->second.width >= width && found->second.height >= height)
@@ -373,8 +375,8 @@ namespace vk::renderer::detail
             // The surface grew. Rare enough to rebuild rather than plan for.
             RetireBeforeDestroy();
             DestroyTarget(found->second);
-            width = std::max(width, found->second.width);
-            height = std::max(height, found->second.height);
+            width = std::min(2048u, std::max(width, found->second.width));
+            height = std::min(2048u, std::max(height, found->second.height));
             g.targets.erase(found);
         }
 
@@ -474,6 +476,7 @@ namespace vk::renderer::detail
     VkFramebuffer GetFramebuffer(VkRenderPass pass, VkImageView colourView, VkImageView depthView,
                                  uint32_t width, uint32_t height)
     {
+        if (!pass) return VK_NULL_HANDLE;
         const FramebufferKey key{ pass, colourView, depthView, width, height };
         auto found = g.legacyFramebuffers.find(key);
         if (found != g.legacyFramebuffers.end()) return found->second;
@@ -482,6 +485,7 @@ namespace vk::renderer::detail
         uint32_t count = 0;
         if (colourView) views[count++] = colourView;
         if (depthView) views[count++] = depthView;
+        if (!count) return VK_NULL_HANDLE;
 
         VkFramebufferCreateInfo info{ VK_STRUCTURE_TYPE_FRAMEBUFFER_CREATE_INFO };
         info.renderPass = pass;
@@ -492,8 +496,13 @@ namespace vk::renderer::detail
         info.layers = 1;
 
         VkFramebuffer fb = VK_NULL_HANDLE;
-        if (vkCreateFramebuffer(g.device, &info, nullptr, &fb) != VK_SUCCESS)
+        VkResult res = vkCreateFramebuffer(g.device, &info, nullptr, &fb);
+        if (res != VK_SUCCESS)
+        {
+            LOGE("renderer: vkCreateFramebuffer failed: %d (pass=%p, count=%u, %ux%u)",
+                 res, pass, count, width, height);
             return VK_NULL_HANDLE;
+        }
 
         g.legacyFramebuffers[key] = fb;
         return fb;
@@ -519,16 +528,39 @@ namespace vk::renderer::detail
     {
         EndPass();
         const VkImageView colourView = colour.view, depthView = depth.view;
-        const VkExtent2D area = Scaled(VkExtent2D{ width, height });
+        if (!colourView && !depthView) return;
+
+        uint32_t maxW = width * g.scale;
+        uint32_t maxH = height * g.scale;
+        if (colourView)
+        {
+            maxW = std::min(maxW, colour.width * g.scale);
+            maxH = std::min(maxH, colour.height * g.scale);
+        }
+        if (depthView)
+        {
+            maxW = std::min(maxW, depth.width * g.scale);
+            maxH = std::min(maxH, depth.height * g.scale);
+        }
+        const VkExtent2D area{ std::max(1u, maxW), std::max(1u, maxH) };
+
         const bool legacy = vk::pipeline::LegacyMode();
         VkRenderPass legacyPass = VK_NULL_HANDLE;
         VkFramebuffer legacyFb = VK_NULL_HANDLE;
         if (legacy)
         {
-            VkSampleCountFlagBits samples = (colour.format != VK_FORMAT_UNDEFINED) ? colour.samples : depth.samples;
+            const VkFormat cFmt = colourView ? colour.format : VK_FORMAT_UNDEFINED;
+            const VkFormat dFmt = depthView ? depth.format : VK_FORMAT_UNDEFINED;
+            VkSampleCountFlagBits samples = (cFmt != VK_FORMAT_UNDEFINED) ? colour.samples : depth.samples;
             if (samples == 0) samples = VK_SAMPLE_COUNT_1_BIT;
-            legacyPass = GetRenderPass(colour.format, depth.format, samples);
+            legacyPass = GetRenderPass(cFmt, dFmt, samples);
             legacyFb = GetFramebuffer(legacyPass, colourView, depthView, area.width, area.height);
+            if (!legacyPass || !legacyFb)
+            {
+                LOGE("renderer: BeginRendering failed to acquire render pass (%p) or framebuffer (%p)",
+                     legacyPass, legacyFb);
+                return;
+            }
         }
         Record([=](VkCommandBuffer command) {
             // What a render pass's dependency in from the outside was: a frame

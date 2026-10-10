@@ -171,28 +171,36 @@ namespace vk::renderer::detail
         raster.lineWidth = 1.0f;
         // Always on, and set per draw: a shadow map drawn without the title's
         // bias shadows the very surfaces it was rendered from.
-        raster.depthBiasEnable = VK_TRUE;
+        raster.depthBiasEnable = (key.depthFormat != VK_FORMAT_UNDEFINED) ? VK_TRUE : VK_FALSE;
 
         multisample.rasterizationSamples = VkSampleCountFlagBits(std::max(key.samples, 1u));
         // The tests themselves are set per draw (DepthTestsFor); `depth` stays empty.
 
-        const gpu::BlendControl blend{ key.blendControl };
-        attachment.blendEnable = !blend.IsPassThrough();
-        attachment.srcColorBlendFactor = BlendFactor(blend.ColorSource());
-        attachment.dstColorBlendFactor = BlendFactor(blend.ColorDestination());
-        attachment.colorBlendOp = BlendOp(blend.ColorOp());
-        attachment.srcAlphaBlendFactor = BlendFactor(blend.AlphaSource());
-        attachment.dstAlphaBlendFactor = BlendFactor(blend.AlphaDestination());
-        attachment.alphaBlendOp = BlendOp(blend.AlphaOp());
-        // Four bits per target, ARGB on the console and RGBA here.
-        const uint32_t mask = key.colourMask & 0xF;
-        attachment.colorWriteMask =
-            ((mask & 1) ? VK_COLOR_COMPONENT_R_BIT : 0u) |
-            ((mask & 2) ? VK_COLOR_COMPONENT_G_BIT : 0u) |
-            ((mask & 4) ? VK_COLOR_COMPONENT_B_BIT : 0u) |
-            ((mask & 8) ? VK_COLOR_COMPONENT_A_BIT : 0u);
-        blending.attachmentCount = 1;
-        blending.pAttachments = &attachment;
+        if (key.colourFormat != VK_FORMAT_UNDEFINED)
+        {
+            const gpu::BlendControl blend{ key.blendControl };
+            attachment.blendEnable = !blend.IsPassThrough();
+            attachment.srcColorBlendFactor = BlendFactor(blend.ColorSource());
+            attachment.dstColorBlendFactor = BlendFactor(blend.ColorDestination());
+            attachment.colorBlendOp = BlendOp(blend.ColorOp());
+            attachment.srcAlphaBlendFactor = BlendFactor(blend.AlphaSource());
+            attachment.dstAlphaBlendFactor = BlendFactor(blend.AlphaDestination());
+            attachment.alphaBlendOp = BlendOp(blend.AlphaOp());
+            // Four bits per target, ARGB on the console and RGBA here.
+            const uint32_t mask = key.colourMask & 0xF;
+            attachment.colorWriteMask =
+                ((mask & 1) ? VK_COLOR_COMPONENT_R_BIT : 0u) |
+                ((mask & 2) ? VK_COLOR_COMPONENT_G_BIT : 0u) |
+                ((mask & 4) ? VK_COLOR_COMPONENT_B_BIT : 0u) |
+                ((mask & 8) ? VK_COLOR_COMPONENT_A_BIT : 0u);
+            blending.attachmentCount = 1;
+            blending.pAttachments = &attachment;
+        }
+        else
+        {
+            blending.attachmentCount = 0;
+            blending.pAttachments = nullptr;
+        }
 
         static constexpr VkDynamicState kDynamicModern[] = {
             VK_DYNAMIC_STATE_VIEWPORT, VK_DYNAMIC_STATE_SCISSOR, VK_DYNAMIC_STATE_DEPTH_BIAS,
@@ -213,19 +221,22 @@ namespace vk::renderer::detail
 
             FacesFor(key.modeCntl, raster.cullMode, raster.frontFace);
 
-            const DepthTests tests = DepthTestsFor(key.depthControl);
-            depth.depthTestEnable = tests.depthTest ? VK_TRUE : VK_FALSE;
-            depth.depthWriteEnable = tests.depthWrite ? VK_TRUE : VK_FALSE;
-            depth.depthCompareOp = tests.depthCompare;
-            depth.stencilTestEnable = tests.stencilTest ? VK_TRUE : VK_FALSE;
-            depth.front.failOp = tests.front.failOp;
-            depth.front.passOp = tests.front.passOp;
-            depth.front.depthFailOp = tests.front.depthFailOp;
-            depth.front.compareOp = tests.front.compareOp;
-            depth.back.failOp = tests.back.failOp;
-            depth.back.passOp = tests.back.passOp;
-            depth.back.depthFailOp = tests.back.depthFailOp;
-            depth.back.compareOp = tests.back.compareOp;
+            if (key.depthFormat != VK_FORMAT_UNDEFINED)
+            {
+                const DepthTests tests = DepthTestsFor(key.depthControl);
+                depth.depthTestEnable = tests.depthTest ? VK_TRUE : VK_FALSE;
+                depth.depthWriteEnable = tests.depthWrite ? VK_TRUE : VK_FALSE;
+                depth.depthCompareOp = tests.depthCompare;
+                depth.stencilTestEnable = tests.stencilTest ? VK_TRUE : VK_FALSE;
+                depth.front.failOp = tests.front.failOp;
+                depth.front.passOp = tests.front.passOp;
+                depth.front.depthFailOp = tests.front.depthFailOp;
+                depth.front.compareOp = tests.front.compareOp;
+                depth.back.failOp = tests.back.failOp;
+                depth.back.passOp = tests.back.passOp;
+                depth.back.depthFailOp = tests.back.depthFailOp;
+                depth.back.compareOp = tests.back.compareOp;
+            }
         }
         else
         {
@@ -235,8 +246,8 @@ namespace vk::renderer::detail
             // Dynamic rendering: the formats of the targets stand where a render
             // pass would.
             colourFormat = VkFormat(key.colourFormat);
-            rendering.colorAttachmentCount = 1;
-            rendering.pColorAttachmentFormats = &colourFormat;
+            rendering.colorAttachmentCount = (key.colourFormat != VK_FORMAT_UNDEFINED) ? 1 : 0;
+            rendering.pColorAttachmentFormats = (key.colourFormat != VK_FORMAT_UNDEFINED) ? &colourFormat : nullptr;
             rendering.depthAttachmentFormat = VkFormat(key.depthFormat);
             rendering.stencilAttachmentFormat = VkFormat(key.depthFormat);
         }
@@ -270,15 +281,20 @@ namespace vk::renderer::detail
         info.pViewportState = &state.viewport;
         info.pRasterizationState = &state.raster;
         info.pMultisampleState = &state.multisample;
-        info.pDepthStencilState = &state.depth;
+        info.pDepthStencilState = (key.depthFormat != VK_FORMAT_UNDEFINED) ? &state.depth : nullptr;
         info.pColorBlendState = &state.blending;
         info.pDynamicState = &state.dynamic;
         info.layout = static_cast<VkPipelineLayout>(vk::pipeline::Layout());
 
         VkPipeline built = VK_NULL_HANDLE;
-        if (vkCreateGraphicsPipelines(g.device, static_cast<VkPipelineCache>(vk::pipeline::Cache()),
-                                      1, &info, nullptr, &built) != VK_SUCCESS)
+        VkResult res = vkCreateGraphicsPipelines(g.device, static_cast<VkPipelineCache>(vk::pipeline::Cache()),
+                                                1, &info, nullptr, &built);
+        if (res != VK_SUCCESS)
+        {
+            LOGE("renderer: vkCreateGraphicsPipelines failed: %d (colour=%d, depth=%d, topo=%u, samples=%u)",
+                 res, key.colourFormat, key.depthFormat, key.topology, key.samples);
             return VK_NULL_HANDLE;
+        }
         return built;
     }
 
