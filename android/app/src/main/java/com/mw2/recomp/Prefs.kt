@@ -140,7 +140,7 @@ class Prefs(context: Context) {
         set(value) = store.edit().putBoolean(KEY_WELCOME, value).apply()
 
     var autoLaunch: Boolean
-        get() = store.getBoolean(KEY_AUTO_LAUNCH, false)
+        get() = store.getBoolean(KEY_AUTO_LAUNCH, true)
         set(value) = store.edit().putBoolean(KEY_AUTO_LAUNCH, value).apply()
 
     companion object {

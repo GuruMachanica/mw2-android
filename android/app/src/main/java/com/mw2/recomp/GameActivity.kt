@@ -78,7 +78,7 @@ class GameActivity : AppCompatActivity(), NativeListener {
     private var vibrator: Vibrator? = null
     private var lastRumble = 0
 
-    private val statsValues = FloatArray(6)
+    private val statsValues = FloatArray(9)
     private var started = false
     private var cachedRendererInfo = ""
 
@@ -252,14 +252,22 @@ class GameActivity : AppCompatActivity(), NativeListener {
                 val (battTemp, isCharging, battPct) = getBatteryStats()
                 val cpuStr = if (cpuUsagePercent >= 0f) String.format(Locale.US, "%.0f%%", cpuUsagePercent) else "N/A"
 
+                val warmupQueued = if (statsValues.size >= 7) statsValues[6].toInt() else 0
+                val warmupCompleted = if (statsValues.size >= 8) statsValues[7].toInt() else 0
+                val warmupLastMs = if (statsValues.size >= 9) statsValues[8].toInt() else 0
+
                 val tempPart = if (temp > 0f) String.format(Locale.US, " · %.0f°C", temp) else ""
                 val ramPart = if (appMb > 0) String.format(Locale.US, " · RAM %dM", appMb) else ""
                 val ftPart = if (frameTimeMs > 0f) String.format(Locale.US, " · %.1fms", frameTimeMs) else ""
+                val warmupPart = if (warmupQueued > 0 && warmupCompleted < warmupQueued) {
+                    val pct = (warmupCompleted * 100) / warmupQueued
+                    String.format(Locale.US, "  •  ⚡ Shaders %d%% (%d/%d)", pct, warmupCompleted, warmupQueued)
+                } else ""
 
                 statsText.text = String.format(
                     Locale.US,
-                    "%d FPS%s  •  CPU %s%s%s  •  Tex %dMB  [▼ HUD]",
-                    fps, ftPart, cpuStr, tempPart, ramPart, texMb
+                    "%d FPS%s  •  CPU %s%s%s  •  Tex %dMB%s  [▼ HUD]",
+                    fps, ftPart, cpuStr, tempPart, ramPart, texMb, warmupPart
                 )
 
                 if (hudIsExpanded) {
@@ -289,7 +297,13 @@ class GameActivity : AppCompatActivity(), NativeListener {
                         append("GPU & VULKAN\n")
                         append("  Device: $devName\n")
                         append("  Backend: $renderMode\n")
-                        append("  Textures: $texMb MB  ·  $tcMode\n\n")
+                        append("  Textures: $texMb MB  ·  $tcMode\n")
+                        if (warmupQueued > 0) {
+                            val pct = (warmupCompleted * 100) / warmupQueued
+                            append("  Prewarm: $warmupCompleted / $warmupQueued ($pct%)  ·  Last: ${warmupLastMs}ms\n\n")
+                        } else {
+                            append("\n")
+                        }
 
                         append("MEMORY & VIEWPORT\n")
                         append("  App / System Total RAM: $ramStr\n")
@@ -613,8 +627,24 @@ class GameActivity : AppCompatActivity(), NativeListener {
         )
         // Both caches live in the app's own folder and make the second start
         // of a level far quicker than the first.
+        val shaderCacheFile = File(filesDir, "shader_cache.bin")
+        if (!shaderCacheFile.exists()) {
+            val legacyShaders = File(filesDir, "shaders")
+            if (legacyShaders.exists() && legacyShaders.length() > 0) {
+                legacyShaders.copyTo(shaderCacheFile, overwrite = true)
+            } else {
+                try {
+                    assets.open("shader_cache.bin").use { input ->
+                        shaderCacheFile.outputStream().use { output ->
+                            input.copyTo(output)
+                        }
+                    }
+                    android.util.Log.i("MW2", "Unpacked bundled shader_cache.bin from assets")
+                } catch (_: Exception) {}
+            }
+        }
         NativeBridge.nativeSetOption("MW2_PIPELINE_CACHE", "${filesDir.absolutePath}/pipeline.cache")
-        NativeBridge.nativeSetOption("MW2_SHADER_CACHE", "${filesDir.absolutePath}/shaders")
+        NativeBridge.nativeSetOption("MW2_SHADER_CACHE", shaderCacheFile.absolutePath)
 
         NativeBridge.nativeLookSettings(
             prefs.lookSensitivityX, prefs.lookSensitivityY,

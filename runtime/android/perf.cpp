@@ -185,7 +185,7 @@ void android::perf::ApplyMemoryDefaults()
     // needed, built at the next start-up so they are not compiled mid-fight.
     if (!paths.files.empty())
     {
-        const std::string pipeline = paths.files + "/pipeline_cache.bin";
+        const std::string pipeline = paths.files + "/pipeline.cache";
         const std::string shaders = paths.files + "/shader_cache.bin";
         setenv("MW2_PIPELINE_CACHE", pipeline.c_str(), 0);
         setenv("MW2_SHADER_CACHE", shaders.c_str(), 0);

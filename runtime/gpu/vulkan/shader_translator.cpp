@@ -73,8 +73,8 @@ namespace
         Id CubeCoordinates(Id a, Id b);
         Id ArrayElement(Id array, Id index);
         void SetArrayElement(Id array, Id index, Id value);
-        void SetPcTo(uint32_t index) { Module::Emit(m_module.Code(), Op::Store, { m_pc, m_module.ConstantU(index) }); }
-        void SetPc(Id value)         { Module::Emit(m_module.Code(), Op::Store, { m_pc, value }); }
+        void SetPcTo(uint32_t index) { if (m_pc) Module::Emit(m_module.Code(), Op::Store, { m_pc, m_module.ConstantU(index) }); }
+        void SetPc(Id value)         { if (m_pc) Module::Emit(m_module.Code(), Op::Store, { m_pc, value }); }
         Id ReadGuestDword(Id addressInDwords, uint32_t index);
         bool DecodeVertexFormat(const Fetch& op, Id address, Id out[4], uint32_t& count);
         void WriteFetchResult(const Fetch& op, Id components[4], uint32_t count);
@@ -142,6 +142,7 @@ namespace
         Id m_fetchConstants = 0;      // the vertex fetch constant file
         Id m_boolConstants = 0;       // the 256 boolean constants, as 8 dwords
         Id m_loopConstants = 0;       // the 32 loop constants, one dword each
+        bool m_linear = false;        // true if control flow has no loops, jumps or calls
 
         // Sequencer state, in function variables because the dispatch loop reads
         // and writes it across blocks.
@@ -227,6 +228,30 @@ namespace
     // to reuse -- is a property of the whole program, not of the instruction.
     void Translator::Analyze()
     {
+        m_linear = true;
+        for (const ControlFlow& cf : m_flow)
+        {
+            switch (cf.Opcode())
+            {
+            case ControlFlowOpcode::Nop:
+            case ControlFlowOpcode::Alloc:
+            case ControlFlowOpcode::MarkVsFetchDone:
+            case ControlFlowOpcode::Exec:
+            case ControlFlowOpcode::ExecEnd:
+            case ControlFlowOpcode::CondExec:
+            case ControlFlowOpcode::CondExecEnd:
+            case ControlFlowOpcode::CondExecPred:
+            case ControlFlowOpcode::CondExecPredEnd:
+            case ControlFlowOpcode::CondExecPredClean:
+            case ControlFlowOpcode::CondExecPredCleanEnd:
+                break;
+            default:
+                m_linear = false;
+                break;
+            }
+            if (!m_linear) break;
+        }
+
         uint32_t lastSlot = bindings::kFetchSlots;
         for (const ControlFlow& cf : m_flow)
         {
@@ -1721,7 +1746,7 @@ namespace
                          { uintPointer, slot, uint32_t(StorageClass::Function), zero });
             Module::EmitString(m_module.Debug(), Op::Name, { slot }, name);
         };
-        scalar(m_pc, "pc");
+        if (!m_linear) scalar(m_pc, "pc");
         scalar(m_lastFetchBase, "vertex_fetch_address");
         scalar(m_lastFetchEndian, "vertex_fetch_endian");
 
@@ -1731,8 +1756,11 @@ namespace
                      { floatPointer, m_previousScalar, uint32_t(StorageClass::Function),
                        m_module.ConstantF(0.0f) });
         Module::EmitString(m_module.Debug(), Op::Name, { m_previousScalar }, "previous_scalar");
-        scalar(m_loopDepth, "loop_depth");
-        scalar(m_callDepth, "call_depth");
+        if (!m_linear)
+        {
+            scalar(m_loopDepth, "loop_depth");
+            scalar(m_callDepth, "call_depth");
+        }
 
         // aL is signed and clamped to [-256, 256] by the sequencer.
         Id intPointer = m_module.Pointer(StorageClass::Function, m_int);
@@ -1759,17 +1787,20 @@ namespace
                        m_module.ConstantFalseValue() });
         Module::EmitString(m_module.Debug(), Op::Name, { m_killed }, "killed");
 
-        Id stack = m_module.ArrayOf(m_uint, kLoopStackDepth);
-        Id stackPointer = m_module.Pointer(StorageClass::Function, stack);
-        auto array = [&](Id& slot, const char* name) {
-            slot = m_module.Allocate();
-            Module::Emit(m_module.Code(), Op::Variable,
-                         { stackPointer, slot, uint32_t(StorageClass::Function) });
-            Module::EmitString(m_module.Debug(), Op::Name, { slot }, name);
-        };
-        array(m_loopIterators, "loop_iterators");
-        array(m_loopIds, "loop_ids");
-        array(m_callStack, "call_stack");
+        if (!m_linear)
+        {
+            Id stack = m_module.ArrayOf(m_uint, kLoopStackDepth);
+            Id stackPointer = m_module.Pointer(StorageClass::Function, stack);
+            auto array = [&](Id& slot, const char* name) {
+                slot = m_module.Allocate();
+                Module::Emit(m_module.Code(), Op::Variable,
+                             { stackPointer, slot, uint32_t(StorageClass::Function) });
+                Module::EmitString(m_module.Debug(), Op::Name, { slot }, name);
+            };
+            array(m_loopIterators, "loop_iterators");
+            array(m_loopIds, "loop_ids");
+            array(m_callStack, "call_stack");
+        }
     }
 
     // aL = iterator * step + start, from the innermost loop's constant,
@@ -2022,55 +2053,74 @@ namespace
         //
         //   loop { switch (pc) { case 0: ...; pc = 1; ... default: break; } }
         const uint32_t caseCount = uint32_t(m_flow.size());
-        Id header = m_module.Allocate();
-        Id dispatch = m_module.Allocate();
-        // The switch needs a merge block of its own: a selection construct may not
-        // merge at the loop's continue target. This one exists only to branch on.
-        Id caseMerge = m_module.Allocate();
-        Id continueTarget = m_module.Allocate();
-        Id merge = m_module.Allocate();
-        // The default needs its own block for the same reason. It breaks out of
-        // the loop, which is how a shader ends.
-        Id defaultBlock = m_module.Allocate();
-        std::vector<Id> blocks(caseCount);
-        for (uint32_t i = 0; i < caseCount; i++) blocks[i] = m_module.Allocate();
-
-        Module::Emit(m_module.Code(), Op::Branch, { header });
-        Module::Emit(m_module.Code(), Op::Label, { header });
-        Module::Emit(m_module.Code(), Op::LoopMerge, { merge, continueTarget, kLoopControlNone });
-        Module::Emit(m_module.Code(), Op::Branch, { dispatch });
-
-        Module::Emit(m_module.Code(), Op::Label, { dispatch });
-        Id current = Emit(Op::Load, m_uint, { m_pc });
-        Module::Emit(m_module.Code(), Op::SelectionMerge, { caseMerge, kSelectionControlNone });
+        if (m_linear)
         {
-            std::vector<uint32_t> operands{ current, defaultBlock };
             for (uint32_t i = 0; i < caseCount; i++)
             {
-                operands.push_back(i);
-                operands.push_back(blocks[i]);
+                EmitControlFlow(m_flow[i], i);
+                if (!m_result.error.empty()) return;
+                if (m_flow[i].IsEnd()) break;
             }
-            auto& code = m_module.Code();
-            code.push_back(Head(Op::Switch, uint32_t(operands.size()) + 1));
-            code.insert(code.end(), operands.begin(), operands.end());
         }
-
-        for (uint32_t i = 0; i < caseCount; i++)
+        else
         {
-            Module::Emit(m_module.Code(), Op::Label, { blocks[i] });
-            EmitControlFlow(m_flow[i], i);
-            if (!m_result.error.empty()) return;
-            Module::Emit(m_module.Code(), Op::Branch, { caseMerge });
+            // The sequencer is a program counter over the control flow list, and Xenos
+            // jumps, calls and loops move it arbitrarily. Rather than recover structured
+            // control flow, the module runs one loop whose body is a switch on the
+            // counter, each control flow instruction a case:
+            //
+            //   loop { switch (pc) { case 0: ...; pc = 1; ... default: break; } }
+            Id header = m_module.Allocate();
+            Id dispatch = m_module.Allocate();
+            // The switch needs a merge block of its own: a selection construct may not
+            // merge at the loop's continue target. This one exists only to branch on.
+            Id caseMerge = m_module.Allocate();
+            Id continueTarget = m_module.Allocate();
+            Id merge = m_module.Allocate();
+            // The default needs its own block for the same reason. It breaks out of
+            // the loop, which is how a shader ends.
+            Id defaultBlock = m_module.Allocate();
+            std::vector<Id> blocks(caseCount);
+            for (uint32_t i = 0; i < caseCount; i++) blocks[i] = m_module.Allocate();
+
+            Module::Emit(m_module.Code(), Op::Branch, { header });
+            Module::Emit(m_module.Code(), Op::Label, { header });
+            Module::Emit(m_module.Code(), Op::LoopMerge, { merge, continueTarget, kLoopControlNone });
+            Module::Emit(m_module.Code(), Op::Branch, { dispatch });
+
+            Module::Emit(m_module.Code(), Op::Label, { dispatch });
+            Id current = Emit(Op::Load, m_uint, { m_pc });
+            Module::Emit(m_module.Code(), Op::SelectionMerge, { caseMerge, kSelectionControlNone });
+            {
+                std::vector<uint32_t> operands{ current, defaultBlock };
+                for (uint32_t i = 0; i < caseCount; i++)
+                {
+                    operands.push_back(i);
+                    operands.push_back(blocks[i]);
+                }
+                auto& code = m_module.Code();
+                code.push_back(Head(Op::Switch, uint32_t(operands.size()) + 1));
+                code.insert(code.end(), operands.begin(), operands.end());
+            }
+
+            for (uint32_t i = 0; i < caseCount; i++)
+            {
+                Module::Emit(m_module.Code(), Op::Label, { blocks[i] });
+                EmitControlFlow(m_flow[i], i);
+                if (!m_result.error.empty()) return;
+                Module::Emit(m_module.Code(), Op::Branch, { caseMerge });
+            }
+
+            Module::Emit(m_module.Code(), Op::Label, { defaultBlock });
+            Module::Emit(m_module.Code(), Op::Branch, { merge });
+
+            Module::Emit(m_module.Code(), Op::Label, { caseMerge });
+            Module::Emit(m_module.Code(), Op::Branch, { continueTarget });
+            Module::Emit(m_module.Code(), Op::Label, { continueTarget });
+            Module::Emit(m_module.Code(), Op::Branch, { header });
+
+            Module::Emit(m_module.Code(), Op::Label, { merge });
         }
-
-        Module::Emit(m_module.Code(), Op::Label, { defaultBlock });
-        Module::Emit(m_module.Code(), Op::Branch, { merge });
-
-        Module::Emit(m_module.Code(), Op::Label, { caseMerge });
-        Module::Emit(m_module.Code(), Op::Branch, { continueTarget });
-        Module::Emit(m_module.Code(), Op::Label, { continueTarget });
-        Module::Emit(m_module.Code(), Op::Branch, { header });
-        Module::Emit(m_module.Code(), Op::Label, { merge });
 
         // The alpha test, folded into the same discard. The three comparison
         // results are exactly the bits of the console's compare function --

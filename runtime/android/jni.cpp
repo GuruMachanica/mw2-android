@@ -21,6 +21,7 @@
 #include "../gpu/vulkan/presenter.h"
 #include "../gpu/vulkan/texture_cache.h"
 #include "../gpu/vulkan/pipeline.h"
+#include "../gpu/vulkan/renderer_state.h"
 #include "../console.h"
 
 #include <android/native_window.h>
@@ -562,6 +563,13 @@ MW2_NATIVE(void, nativeStats)(JNIEnv* env, jobject, jfloatArray out)
     if (len >= 6)
     {
         values[5] = jfloat(presented);
+    }
+    if (len >= 7)
+    {
+        auto ws = vk::renderer::detail::GetWarmupStats();
+        values[6] = jfloat(ws.queued);
+        if (len >= 8) values[7] = jfloat(ws.completed);
+        if (len >= 9) values[8] = jfloat(ws.lastCompileMs);
     }
     env->SetFloatArrayRegion(out, 0, len, values.data());
 }

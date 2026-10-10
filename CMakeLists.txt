@@ -289,7 +289,7 @@ if(NOT WIN32 AND NOT ANDROID)
 endif()
 
 # The two tools below are for working on the renderer, on Linux.
-if(NOT WIN32 AND NOT ANDROID)
+if(NOT ANDROID)
 # ---- offline shader translation -------------------------------------------
 # The translator has to live in the runtime, because the title hands the GPU
 # microcode while it runs. Building it as a tool too gives a fast loop against

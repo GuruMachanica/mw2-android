@@ -391,29 +391,26 @@ namespace vk::renderer::detail
 
     void StartPreparing()
     {
-        if (!vk::pipeline::PipelineLibraries())
-        {
-            std::lock_guard lock(p.lock);
-            p.stopped = true;
-            p.jobs.clear();
-            LOGI("renderer: no pipeline libraries on this device; shaders are compiled at"
-                 " their first draw");
-            return;
-        }
         {
             std::lock_guard lock(p.lock);
             p.running = true;
         }
         const unsigned threads = std::clamp(std::thread::hardware_concurrency() / 4, 1u, 4u);
         for (unsigned i = 0; i < threads; i++) p.workers.emplace_back(Work);
+        if (vk::pipeline::PipelineLibraries())
         {
             std::lock_guard lock(o.lock);
             o.running = true;
+            o.worker = std::thread(Optimise);
+            LOGI("renderer: shaders are compiled as the title loads them, on %u thread%s; pipelines"
+                 " are linked from them at the draw and optimised in the background", threads,
+                 threads == 1 ? "" : "s");
         }
-        o.worker = std::thread(Optimise);
-        LOGI("renderer: shaders are compiled as the title loads them, on %u thread%s; pipelines"
-             " are linked from them at the draw and optimised in the background", threads,
-             threads == 1 ? "" : "s");
+        else
+        {
+            LOGI("renderer: monolithic mode; shaders are pre-compiled as the title loads them, on %u worker thread%s",
+                 threads, threads == 1 ? "" : "s");
+        }
     }
 
     void StopPreparing()
