@@ -88,12 +88,11 @@ jobs:
           MW2_NDK_VERSION: ${{ env.NDK_VERSION }}
           MW2_BUILD_SHA: ${{ github.sha }}
         run: |
-          chmod +x gradlew
           case "${{ github.event.inputs.build_type || 'release' }}" in
             debug)   task="assembleCampaignDebug" ;;
             *)       task="assembleCampaignRelease" ;;
           esac
-          ./gradlew "$task" --no-daemon --stacktrace
+          gradle "$task" --no-daemon --stacktrace
 
       - name: Verify APK
         run: |
