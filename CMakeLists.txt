@@ -67,7 +67,8 @@ if(NOT EXISTS "${SIMDE_INCLUDE_DIR}/simde/simde-common.h" AND EXISTS "${CMAKE_SO
 endif()
 target_include_directories(ppc_recomp PUBLIC
     "${MW2_PPC_DIR}"
-    "${SIMDE_INCLUDE_DIR}")
+    "${SIMDE_INCLUDE_DIR}"
+    "${SIMDE_INCLUDE_DIR}/simde")
 # The generated code is machine output; its warnings are noise.
 target_compile_options(ppc_recomp PRIVATE -w)
 # The console's hardware registers are plain memory in this address space. The

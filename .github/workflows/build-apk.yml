@@ -60,9 +60,12 @@ jobs:
         run: |
           sudo apt-get update
           sudo apt-get install -y ninja-build ccache cmake
-          if [ ! -d "XenonRecomp/thirdparty/simde" ]; then
-            mkdir -p XenonRecomp/thirdparty
-            git clone --depth 1 https://github.com/simd-everywhere/simde.git XenonRecomp/thirdparty/simde
+          if [ ! -d "XenonRecomp/thirdparty/simde/x86" ]; then
+            git clone --depth 1 https://github.com/simd-everywhere/simde.git /tmp/simde-repo
+            mkdir -p XenonRecomp/thirdparty/simde
+            cp -r /tmp/simde-repo/simde/* XenonRecomp/thirdparty/simde/
+            cp -r /tmp/simde-repo/* XenonRecomp/thirdparty/simde/ 2>/dev/null || true
+            rm -rf /tmp/simde-repo
           fi
 
       - name: Install Android NDK & CMake
