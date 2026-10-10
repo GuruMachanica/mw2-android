@@ -162,6 +162,13 @@ namespace
     };
     State g;
 
+    std::atomic<uint32_t> g_currentOpcode{ 0 };
+    std::atomic<const char*> g_currentOpcodeName{ nullptr };
+    std::atomic<uint32_t> g_currentDepth{ 0 };
+    std::atomic<uint64_t> g_lastVertexHash{ 0 };
+    std::atomic<uint64_t> g_lastPixelHash{ 0 };
+    std::atomic<const char*> g_currentDrawStage{ "idle" };
+
     // Bins in milliseconds: under 8, 12, 16.7, 20, 33.3, 50, and above.
     uint32_t FrameBin(double ms)
     {
@@ -426,6 +433,8 @@ namespace
                 call.pixelCode = g.shader[1].data();
                 call.pixelWords = g.shader[1].size();
                 call.pixelHash = g.shaderHash[1];
+                g_lastVertexHash.store(call.vertexHash, std::memory_order_relaxed);
+                g_lastPixelHash.store(call.pixelHash, std::memory_order_relaxed);
                 vk::renderer::Draw(g.registers, call);
             }
         }
@@ -533,6 +542,9 @@ namespace
     {
         const uint32_t opcode = (header >> 8) & 0x7F;
         g.opcodeCount[opcode]++;
+        g_currentOpcode.store(opcode, std::memory_order_relaxed);
+        g_currentOpcodeName.store(OpcodeName(opcode), std::memory_order_relaxed);
+        g_currentDepth.store(depth, std::memory_order_relaxed);
 
         if (!OpcodeName(opcode))
         {
@@ -921,6 +933,29 @@ bool gpu::DisplayColourTable(uint32_t out[256])
     std::memcpy(out, g.displayLut, sizeof g.displayLut);
     return true;
 }
+
+gpu::detail::OpcodeStatus gpu::detail::CurrentOpcodeStatus()
+{
+    OpcodeStatus status{};
+    status.opcode = g_currentOpcode.load(std::memory_order_relaxed);
+    status.name = g_currentOpcodeName.load(std::memory_order_relaxed);
+    status.depth = g_currentDepth.load(std::memory_order_relaxed);
+    status.batchWork = g.batchWork;
+    status.lastVertexHash = g_lastVertexHash.load(std::memory_order_relaxed);
+    status.lastPixelHash = g_lastPixelHash.load(std::memory_order_relaxed);
+    return status;
+}
+
+const char* gpu::detail::CurrentDrawStage()
+{
+    return g_currentDrawStage.load(std::memory_order_relaxed);
+}
+
+void gpu::detail::SetCurrentDrawStage(const char* stage)
+{
+    g_currentDrawStage.store(stage, std::memory_order_relaxed);
+}
+
 
 void gpu::detail::ReportCommandProcessor()
 {

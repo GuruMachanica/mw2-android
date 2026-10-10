@@ -97,6 +97,12 @@ namespace
         fn(ctx, guest::Base());
     }
 
+    std::atomic<bool> g_inBatch{ false };
+    std::atomic<uint32_t> g_batchAvailable{ 0 };
+    std::atomic<uint32_t> g_batchReadIndex{ 0 };
+    std::atomic<uint32_t> g_batchWptr{ 0 };
+    std::atomic<int64_t> g_batchStartTimeNs{ 0 };
+
     // The ring consumer.
     void Worker()
     {
@@ -121,10 +127,18 @@ namespace
                 std::chrono::steady_clock::time_point began;
                 if constexpr (diag::kOn) began = std::chrono::steady_clock::now();
                 pacing::Note(pacing::kBatchBegin, available);
+                g_batchAvailable.store(available, std::memory_order_relaxed);
+                g_batchReadIndex.store(g.ring.readIndex, std::memory_order_relaxed);
+                g_batchWptr.store(wptr, std::memory_order_relaxed);
+                const auto beganTime = std::chrono::steady_clock::now();
+                g_batchStartTimeNs.store(std::chrono::duration_cast<std::chrono::nanoseconds>(
+                    beganTime.time_since_epoch()).count(), std::memory_order_relaxed);
+                g_inBatch.store(true, std::memory_order_release);
                 {
                     stutters::Timed timed(stutters::kRingBatches);
                     ExecuteRing(g.ring.base, g.ring.readIndex, g.ring.mask, available);
                 }
+                g_inBatch.store(false, std::memory_order_release);
                 pacing::Note(pacing::kBatchEnd);
                 if constexpr (diag::kOn)
                 {
@@ -229,6 +243,23 @@ void gpu::detail::RingPosition(uint32_t& read, uint32_t& written, uint32_t& writ
     read = g.ring.readIndex;
     written = g.ring.mask ? uint32_t(*GuestPtr<be32>(kCpRbWptr)) & g.ring.mask : 0;
     writeBack = g.rptrWriteBack ? uint32_t(*GuestPtr<be32>(g.rptrWriteBack)) : 0;
+}
+
+gpu::detail::BatchStatus gpu::detail::CurrentBatchStatus()
+{
+    BatchStatus status{};
+    status.inBatch = g_inBatch.load(std::memory_order_acquire);
+    if (status.inBatch)
+    {
+        status.available = g_batchAvailable.load(std::memory_order_relaxed);
+        status.readIndex = g_batchReadIndex.load(std::memory_order_relaxed);
+        status.wptr = g_batchWptr.load(std::memory_order_relaxed);
+        const int64_t startNs = g_batchStartTimeNs.load(std::memory_order_relaxed);
+        const int64_t nowNs = std::chrono::duration_cast<std::chrono::nanoseconds>(
+            std::chrono::steady_clock::now().time_since_epoch()).count();
+        status.elapsedMs = (nowNs > startNs) ? uint64_t((nowNs - startNs) / 1000000) : 0;
+    }
+    return status;
 }
 
 void gpu::Initialise()

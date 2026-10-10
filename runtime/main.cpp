@@ -62,6 +62,7 @@ void crash::RequestExit(const char* why)
     std::thread([why] {
         LOGI("--------------------------------------------------");
         LOGI("exiting: %s", why);
+        crash::StopHangMonitor();
         stutters::Ending();
         gpu::Shutdown();
         ReportAll();

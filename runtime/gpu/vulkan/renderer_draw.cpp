@@ -7,6 +7,7 @@
 #include "../../guest.h"
 #include "../../kernel/physical.h"
 #include "../../log.h"
+#include "../internal.h"
 
 #include <algorithm>
 #include <bit>
@@ -225,6 +226,12 @@ using namespace vk::renderer::detail;
 
 void vk::renderer::Draw(const gpu::RegisterFile& r, const DrawCall& call)
 {
+    struct StageScope
+    {
+        StageScope() { gpu::detail::SetCurrentDrawStage("Draw_Start"); }
+        ~StageScope() { gpu::detail::SetCurrentDrawStage("Draw_Idle"); }
+    } stageScope;
+
     Stopwatch watch(g.drawNanoseconds);
     if (!g.device) return;
     // A flash hunt's record of this draw, open until it returns however it does.
@@ -241,6 +248,7 @@ void vk::renderer::Draw(const gpu::RegisterFile& r, const DrawCall& call)
     const VkPrimitiveTopology topology = TopologyFor(call.primitive);
     if (topology == VK_PRIMITIVE_TOPOLOGY_MAX_ENUM) { Skip("primitive type"); return; }
 
+    gpu::detail::SetCurrentDrawStage("Draw_ShaderFor");
     const Shader* vertex = ShaderFor(shader::Type::Vertex, call.vertexHash,
                                      call.vertexCode, call.vertexWords);
     const Shader* pixel = ShaderFor(shader::Type::Pixel, call.pixelHash,
@@ -318,13 +326,14 @@ void vk::renderer::Draw(const gpu::RegisterFile& r, const DrawCall& call)
     const uint32_t height = std::clamp(uint32_t(scissor.offset.y) + scissor.extent.height,
                                        32u, maxAllowedHeight);
 
+    gpu::detail::SetCurrentDrawStage("Draw_EnsureTarget");
     Target* colourTarget = EnsureTarget({ colour.BaseTile(), usePitch,
                                           uint32_t(ColourFormatFor(colour.Format())),
                                           useSamples, false },
                                         width, height, colour.Format());
     Target* depthTarget = EnsureTarget(DepthKey(depthInfo.BaseTile(), uint32_t(g.depthFormat),
                                                 useSamples),
-                                       width, height, depthInfo.Format());
+                                        width, height, depthInfo.Format());
     if (!colourTarget || !depthTarget) return;
 
     if (!BeginFrame()) { Skip("no command buffer"); return; }
@@ -337,6 +346,7 @@ void vk::renderer::Draw(const gpu::RegisterFile& r, const DrawCall& call)
     const uint32_t passHeight = std::min(colourTarget->height, depthTarget->height);
     if (colourTarget->view != g.currentColour || depthTarget->view != g.currentDepth)
     {
+        gpu::detail::SetCurrentDrawStage("Draw_BeginRendering");
         if (diag::kOn && TracePasses() && DiagnoseHere() && g.passFrames <= TracePasses())
             LOGK("pass: %ux%u colour at tile %u, %ux drawn %ux, mask %08X, depth %08X, mode %u,"
                  " scissor %d,%d %ux%u, after %llu draws; depth tile %u %ux, %llu draws,"
@@ -497,6 +507,7 @@ void vk::renderer::Draw(const gpu::RegisterFile& r, const DrawCall& call)
         key.depthControl = depthControl;
         key.modeCntl = modeCntl;
     }
+    gpu::detail::SetCurrentDrawStage("Draw_EnsurePipeline");
     bool newPipeline = false;
     VkPipeline built = [&] { Stopwatch watch(g.pipelineNanoseconds);
                              return EnsurePipeline(key, *vertex, *pixel, &newPipeline); }();
@@ -516,6 +527,7 @@ void vk::renderer::Draw(const gpu::RegisterFile& r, const DrawCall& call)
                        ? pixel->translation.textureKinds[s]
                        : vertex->translation.textureKinds[s];
     uint32_t scaledSlots = 0;
+    gpu::detail::SetCurrentDrawStage("Draw_TextureSetFor");
     VkDescriptorSet textureSet = TextureSetFor(
         r, vertex->translation.textureMask | pixel->translation.textureMask, kinds, scaledSlots);
     if (!textureSet) { Skip("no texture descriptor set"); return; }
@@ -789,6 +801,7 @@ void vk::renderer::Draw(const gpu::RegisterFile& r, const DrawCall& call)
         op.firstIndex = indexOffset / (wide ? 4 : 2);
     }
     else op.count = call.indexCount;
+    gpu::detail::SetCurrentDrawStage("Draw_Record");
     Record(op);
     colourTarget->draws++;
     // The depth target too, so a dump can tell a depth buffer some pass is

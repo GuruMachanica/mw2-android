@@ -43,6 +43,30 @@ namespace gpu::detail
     // The ring's read and write indices, and what the read-pointer write-back holds.
     void RingPosition(uint32_t& read, uint32_t& written, uint32_t& writeBack);
 
+    struct BatchStatus
+    {
+        bool inBatch;
+        uint32_t available;
+        uint32_t readIndex;
+        uint32_t wptr;
+        uint64_t elapsedMs;
+    };
+    BatchStatus CurrentBatchStatus();
+
+    struct OpcodeStatus
+    {
+        uint32_t opcode;
+        const char* name;
+        uint32_t depth;
+        uint64_t batchWork;
+        uint64_t lastVertexHash;
+        uint64_t lastPixelHash;
+    };
+    OpcodeStatus CurrentOpcodeStatus();
+
+    const char* CurrentDrawStage();
+    void SetCurrentDrawStage(const char* stage);
+
     // ---- arena.cpp
     // An EVENT_WRITE_SHD aimed at the arena's progress block: true when it was
     // one, applied or not.

@@ -83,10 +83,13 @@ if __name__ == "__main__":
         outdir = sys.argv[2]
         want = [w.lower() for w in sys.argv[3:]]
         for name, sec, size, attr, isdir in entries:
-            if isdir:
+            if isdir or name.startswith("$SystemUpdate"):
                 continue
             if want and not any(w in name.lower() for w in want):
                 continue
             dest = os.path.join(outdir, name)
+            if os.path.exists(dest) and os.path.getsize(dest) == size:
+                print(f"already exists: {name}")
+                continue
             fs.extract(sec, size, dest)
             print(f"extracted {name} -> {dest} ({size} bytes)")

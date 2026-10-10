@@ -18,4 +18,13 @@ namespace crash
     // The guest never returns, so nothing else can end the process tidily.
     // Safe to call from any thread, including one the shutdown will join.
     void RequestExit(const char* why);
+
+    // Dumps the backtrace of the calling thread and signals all other registered
+    // threads to dump their backtraces.
+    void DumpAllThreads(const char* reason = nullptr);
+
+    // Background thread that monitors for hangs (e.g. stalled GPU ring batches).
+    void StartHangMonitor();
+    void StopHangMonitor();
 }
+

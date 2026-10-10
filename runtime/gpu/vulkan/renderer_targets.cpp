@@ -767,8 +767,13 @@ namespace vk::renderer::detail
         std::lock_guard lock(vk::pipeline::QueueMutex());
         vkResetFences(g.device, 1, &g.setupFence);
         vkQueueSubmit(g.queue, 1, &submit, g.setupFence);
-        vk::pipeline::Failed(vkWaitForFences(g.device, 1, &g.setupFence, VK_TRUE, UINT64_MAX),
-                             "the set-up fence");
+        VkResult res = vkWaitForFences(g.device, 1, &g.setupFence, VK_TRUE, 2000000000ull);
+        if (res == VK_TIMEOUT)
+        {
+            LOGW("renderer: waiting for the set-up fence took >2 seconds; continuing wait...");
+            res = vkWaitForFences(g.device, 1, &g.setupFence, VK_TRUE, UINT64_MAX);
+        }
+        vk::pipeline::Failed(res, "the set-up fence");
     }
 }
 

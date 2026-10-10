@@ -23,12 +23,13 @@ The callback receives the context value itself, not a pointer to it: MW2's
 callback tests a "started" flag inside that object and returns without mixing
 when it is clear.
 
-Pacing is by the wall clock, with the device as the arbiter. Below three queued
-frames the callback is pumped early; above 24 (128 ms) frames are dropped. The
-callback keeps its nominal rate either way, because the title's sound state
-machines advance inside it. A worker that falls far behind (the process was
-stopped) resynchronises instead of pumping a burst. `MW2_NO_AUDIO=1` opens no
-device; the mixer and the decoder still run.
+Pacing is locked to the wall-clock 5.333 ms cadence (187.5 Hz) matching the exact
+48 kHz sample production rate. Buffer headroom allows up to 48 queued frames (256 ms)
+to withstand dense explosions or level transitions before frames are dropped. The callback
+keeps its nominal rate, advancing the sound state machines smoothly without pitch artifacts
+or underruns. A worker that falls far behind (e.g. process was suspended or long frame)
+resynchronises cleanly instead of pumping a burst. `MW2_NO_AUDIO=1` opens no device; the mixer
+and the decoder still run.
 
 Two other imports matter to the mixer:
 

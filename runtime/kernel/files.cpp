@@ -352,6 +352,7 @@ PPC_FUNC(__imp__NtOpenFile)
 PPC_FUNC(__imp__NtReadFile)
 {
     auto file = std::dynamic_pointer_cast<FileObject>(LookupHandle(ctx.r3.u32));
+    auto event = LookupHandleAs<Event>(ctx.r4.u32);
     auto* iosb = GuestPtr<XIoStatusBlock>(ctx.r7.u32);
     uint32_t buffer = ctx.r8.u32;
     uint32_t length = ctx.r9.u32;
@@ -360,6 +361,7 @@ PPC_FUNC(__imp__NtReadFile)
     if (!file || !file->handle || !buffer)
     {
         if (iosb) { iosb->status = X_STATUS_INVALID_PARAMETER; iosb->information = 0; }
+        if (event) event->Set();
         ctx.r3.u64 = X_STATUS_INVALID_PARAMETER;
         return;
     }
@@ -367,11 +369,13 @@ PPC_FUNC(__imp__NtReadFile)
     int64_t offset = offsetPtr ? int64_t(uint64_t(*GuestPtr<be64>(offsetPtr))) : -1;
     uint32_t apcRoutine = ctx.r5.u32 & ~3u;
 
+    if (event) event->Reset();
+
     // Deferred to APC-delivery time when the caller asked for a completion
     // routine, so the buffer is filled at the moment the title is waiting for it
     // rather than while it is still decompressing out of the other half of its
     // double buffer.
-    auto transfer = [file, buffer, length, offset, iosb]
+    auto transfer = [file, event, buffer, length, offset, iosb]
     {
         std::lock_guard g(file->lock);
         // C requires a positioning call between a write and a read on the same
@@ -387,6 +391,7 @@ PPC_FUNC(__imp__NtReadFile)
         std::memcpy(guest::Base() + buffer, bounce.data(), got);
         uint32_t status = (got == 0 && length != 0) ? X_STATUS_END_OF_FILE : X_STATUS_SUCCESS;
         if (iosb) { iosb->status = status; iosb->information = uint32_t(got); }
+        if (event) event->Set();
         if (TraceFiles())
             LOGK("read %s: %u bytes at %lld -> %zu into %08X (%s)", file->path.filename().string().c_str(),
                  length, (long long)offset, got, buffer, status ? "eof" : "ok");
@@ -409,6 +414,7 @@ PPC_FUNC(__imp__NtReadFile)
 PPC_FUNC(__imp__NtWriteFile)
 {
     auto file = std::dynamic_pointer_cast<FileObject>(LookupHandle(ctx.r3.u32));
+    auto event = LookupHandleAs<Event>(ctx.r4.u32);
     auto* iosb = GuestPtr<XIoStatusBlock>(ctx.r7.u32);
     uint32_t buffer = ctx.r8.u32;
     uint32_t length = ctx.r9.u32;
@@ -419,6 +425,7 @@ PPC_FUNC(__imp__NtWriteFile)
     if (!file || !file->handle || !file->writable || !buffer)
     {
         if (iosb) { iosb->status = X_STATUS_SUCCESS; iosb->information = length; }
+        if (event) event->Set();
         ctx.r3.u64 = X_STATUS_SUCCESS;
         return;
     }
@@ -434,6 +441,7 @@ PPC_FUNC(__imp__NtWriteFile)
 
     const uint32_t status = (put == length) ? X_STATUS_SUCCESS : X_STATUS_UNSUCCESSFUL;
     if (iosb) { iosb->status = status; iosb->information = uint32_t(put); }
+    if (event) event->Set();
     if (TraceFiles())
         LOGK("write %s: %u bytes at %lld -> %zu", file->path.filename().string().c_str(),
              length, (long long)offset, put);

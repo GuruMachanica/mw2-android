@@ -9,11 +9,14 @@
 #include "log.h"
 #include "diagnostics.h"
 #include "platform.h"
+#include "gpu/internal.h"
 #include <ppc_config.h>
 #include <csignal>
 #include <cstdio>
 #include <cstdlib>
 #include <cstring>
+#include <thread>
+#include <chrono>
 
 #ifndef _WIN32
 #if !defined(__ANDROID__)
@@ -264,6 +267,67 @@ namespace
         crash::OnFault();
         _exit(5);
     }
+    std::atomic<bool> g_hangMonitorRunning{ false };
+    std::thread g_hangMonitorThread;
+
+    void HangMonitorLoop()
+    {
+        uint32_t lastLoggedSec = 0;
+        while (g_hangMonitorRunning.load(std::memory_order_relaxed))
+        {
+            std::this_thread::sleep_for(std::chrono::milliseconds(500));
+            if (!g_hangMonitorRunning.load(std::memory_order_relaxed)) break;
+
+            auto batch = gpu::detail::CurrentBatchStatus();
+            if (batch.inBatch && batch.elapsedMs >= 4000)
+            {
+                uint32_t sec = uint32_t(batch.elapsedMs / 1000);
+                if (sec != lastLoggedSec && (sec % 3 == 0 || sec == 4))
+                {
+                    lastLoggedSec = sec;
+                    auto opcode = gpu::detail::CurrentOpcodeStatus();
+                    const char* drawStage = gpu::detail::CurrentDrawStage();
+                    std::fprintf(stderr, "\n[E] ==================================================\n");
+                    std::fprintf(stderr, "[E] HANG DETECTED: GPU ring batch running for %llu ms!\n", (unsigned long long)batch.elapsedMs);
+                    std::fprintf(stderr, "[E]   Batch stats: available=%u, readIndex=%u, wptr=%u\n", batch.available, batch.readIndex, batch.wptr);
+                    std::fprintf(stderr, "[E]   Current opcode: %u (%s), depth=%u, batchWork=%llu\n", opcode.opcode, opcode.name ? opcode.name : "?", opcode.depth, (unsigned long long)opcode.batchWork);
+                    std::fprintf(stderr, "[E]   Draw stage: %s, last vHash=%016llX, pHash=%016llX\n", drawStage ? drawStage : "none", (unsigned long long)opcode.lastVertexHash, (unsigned long long)opcode.lastPixelHash);
+                    std::fprintf(stderr, "[E] ==================================================\n");
+                    std::fflush(stderr);
+
+                    kernel::ReportWaits();
+                    crash::DumpAllThreads("GPU ring batch hang");
+                }
+            }
+        }
+    }
+}
+
+void crash::DumpAllThreads(const char* reason)
+{
+    if (reason)
+        std::fprintf(stderr, "\n[E] ==== HANG / THREAD DUMP: %s ====\n", reason);
+    std::fflush(stderr);
+    DumpBacktrace("caller thread backtrace");
+    DumpOtherThreads();
+}
+
+void crash::StartHangMonitor()
+{
+    if (g_hangMonitorRunning.exchange(true)) return;
+    g_hangMonitorThread = std::thread(HangMonitorLoop);
+}
+
+void crash::StopHangMonitor()
+{
+    if (!g_hangMonitorRunning.exchange(false)) return;
+    if (g_hangMonitorThread.joinable())
+    {
+        if (g_hangMonitorThread.get_id() != std::this_thread::get_id())
+            g_hangMonitorThread.join();
+        else
+            g_hangMonitorThread.detach();
+    }
 }
 
 void crash::RegisterThread(const char* name)
@@ -312,6 +376,8 @@ void crash::Install()
         alarm(seconds);
         LOGI("watchdog armed for %u seconds", seconds);
     }
+
+    StartHangMonitor();
 }
 
 extern "C" void MW2ReportBadIndirectCall(unsigned int guestAddress)
@@ -419,6 +485,15 @@ void crash::RegisterThread(const char* name)
 
 const char* crash::CurrentThreadName() { return t_name; }
 void crash::UnregisterThread() {}
+
+void crash::DumpAllThreads(const char* reason)
+{
+    if (reason)
+        std::fprintf(stderr, "\n[E] ==== HANG / THREAD DUMP: %s ====\n", reason);
+    platform::PrintBacktrace("caller thread backtrace");
+}
+void crash::StartHangMonitor() {}
+void crash::StopHangMonitor() {}
 
 extern "C" void MW2ReportBadIndirectCall(unsigned int guestAddress)
 {

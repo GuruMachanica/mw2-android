@@ -452,7 +452,8 @@ PPC_FUNC(__imp__XamInputGetState)
             b |= MouseInputs(triggers, axes[2], axes[3]);
 #ifdef _WIN32
             auto isDown = [](int vk) { return (GetAsyncKeyState(vk) & 0x8000) != 0; };
-            if (isDown(VK_RETURN) || isDown(VK_ESCAPE)) b |= BTN_START;
+            if (isDown(VK_RETURN))                      b |= BTN_START;
+            if (isDown(VK_ESCAPE))                      b |= BTN_BACK;
             if (isDown(VK_TAB) || isDown(VK_BACK))      b |= BTN_BACK;
             if (isDown(VK_UP))                          b |= BTN_DPAD_UP;
             if (isDown(VK_DOWN))                        b |= BTN_DPAD_DOWN;
@@ -570,7 +571,7 @@ PPC_FUNC(__imp__XamInputGetCapabilities)
     return;
 #endif
 #ifdef MW2_USE_SDL
-    if (PadFor(user) || (user < 4 && g_scripted[user]) || (user == 0 && player::Wanted()))
+    if (user == 0 || PadFor(user) || (user < 4 && g_scripted[user]) || player::Wanted())
     {
         // What a wired 360 pad reports: every control it has at full range,
         // and both motors.

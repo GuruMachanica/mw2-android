@@ -80,3 +80,11 @@ config/*_switch_tables.tu0.toml
 
 # ---- a development run's switches (docs/switches.md, "The settings file") ----
 .env
+
+# ---- local vendor tools and temporary binaries ----
+tools/rad/
+tools/xdvdfs_bin/
+rad_installer.exe
+*.txt
+!CMakeLists.txt
+!requirements.txt

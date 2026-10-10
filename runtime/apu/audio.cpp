@@ -46,8 +46,8 @@ namespace
     constexpr auto     kFrameInterval = std::chrono::microseconds(5333);
 
     // Queue bounds on the host side, in frames of 5.333 ms.
-    constexpr uint32_t kLowWaterFrames  = 3;    // pump early below this
-    constexpr uint32_t kHighWaterFrames = 24;   // drop above this (128 ms)
+    constexpr uint32_t kLowWaterFrames  = 3;    // unused
+    constexpr uint32_t kHighWaterFrames = 48;   // drop above this (256 ms)
 
     constexpr uint32_t kMaxClients = 8;
     constexpr uint32_t kHandleTag = 0x41550000u;
@@ -187,7 +187,6 @@ namespace
         for (;;)
         {
             uint32_t callback = 0, context = 0;
-            Clock::time_point due{};
             {
                 std::unique_lock<std::mutex> guard(g_lock);
                 Client* pick = nullptr;
@@ -198,24 +197,19 @@ namespace
                     g_wake.wait(guard);
                     continue;
                 }
-                due = pick->next;
                 const auto now = Clock::now();
-                // Behind by a lot (the process was stopped): resynchronise rather
-                // than pump a burst.
-                if (due + 40 * kFrameInterval < now) due = now;
-                const bool starving = QueuedFrames() < kLowWaterFrames && g_outputOpen &&
-                                      now - lastPump >= std::chrono::milliseconds(1);
-                if (due > now && !starving)
+                if (pick->next > now)
                 {
-                    g_wake.wait_until(guard, due);
+                    g_wake.wait_until(guard, pick->next);
                     continue;
                 }
-                if (starving && due > now) g_earlyPumps++;
-                pick->next = std::max(due, now - kFrameInterval) + kFrameInterval;
+                // Resynchronise if falling too far behind (e.g. process paused or long frame)
+                if (pick->next + 20 * kFrameInterval < now)
+                    pick->next = now;
+                pick->next += kFrameInterval;
                 callback = pick->callback;
                 context = pick->context;
             }
-            lastPump = Clock::now();
             g_callbacks++;
             // The callback takes the context it registered: the title's own object.
             caller.Call(callback, context);
