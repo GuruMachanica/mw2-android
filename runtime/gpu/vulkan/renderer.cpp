@@ -456,10 +456,12 @@ void vk::renderer::Shutdown()
     // last frames are still on the GPU, and they use it -- and the last
     // commands may still be with the recorder thread.
     vk::record::Stop();
+    StopWarmupScheduler();
     vkDeviceWaitIdle(g.device);
     StopPreparing();
     vk::display::Shutdown();
     WriteShaderCache();
+    vk::pipeline::SaveCache();
     SummariseTargets();
     ClearRenderPassCache();
     g.pipelineCount = g.pipelines.size();

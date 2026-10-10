@@ -5,22 +5,41 @@
 #include "../../diagnostics.h"
 #include "../../log.h"
 #include "../../report.h"
+#include "pipeline.h"
 
+#include <chrono>
+#include <condition_variable>
 #include <cstdio>
+#include <deque>
+#include <mutex>
+#include <thread>
+#include <unordered_set>
+#ifdef MW2_ANDROID
+#include <sys/resource.h>
+#endif
 
 #ifdef MW2_HAVE_VULKAN
 
 namespace vk::renderer::detail
 {
+    namespace
+    {
+        std::mutex g_shadersMutex;
+        std::mutex g_pipelinesMutex;
+    }
+
     // A shader the title has not drawn with before here: taken from the ones
     // compiled when it was loaded (TakePrepared), or translated and compiled
     // now -- a stall, which is why the load-time path exists.
     const Shader* ShaderFor(shader::Type type, uint64_t hash, const uint32_t* code, size_t words)
     {
         if (!code || !words) return nullptr;
-        auto found = g.shaders.find(hash);
-        if (found != g.shaders.end())
-            return found->second.module ? &found->second : nullptr;
+        {
+            std::lock_guard lock(g_shadersMutex);
+            auto found = g.shaders.find(hash);
+            if (found != g.shaders.end())
+                return found->second.module ? &found->second : nullptr;
+        }
 
         Shader entry;
         if (!TakePrepared(hash, entry))
@@ -41,6 +60,7 @@ namespace vk::renderer::detail
                  (unsigned long long)hash,
                  entry.translation.ok ? "driver refused the module"
                                       : entry.translation.error.c_str());
+        std::lock_guard lock(g_shadersMutex);
         auto& stored = g.shaders.emplace(hash, std::move(entry)).first->second;
         return ok ? &stored : nullptr;
     }
@@ -336,8 +356,12 @@ namespace vk::renderer::detail
                               bool* made)
     {
         TakeOptimisedPipelines();
-        auto found = g.pipelines.find(key);
-        if (found != g.pipelines.end()) return found->second;
+        {
+            std::lock_guard lock(g_pipelinesMutex);
+            auto found = g.pipelines.find(key);
+            if (found != g.pipelines.end()) return found->second;
+        }
+
         if (made) *made = true;
         LOGI("renderer: pipeline miss for %016llX/%016llX (c=%d, d=%d, topo=%u, blend=%08X, mask=%X, depth=%08X, mode=%08X)",
              (unsigned long long)key.vertexShader, (unsigned long long)key.pixelShader,
@@ -358,8 +382,161 @@ namespace vk::renderer::detail
         if (!built)
             LOGW("renderer: pipeline for %016llX/%016llX rejected",
                  (unsigned long long)key.vertexShader, (unsigned long long)key.pixelShader);
-        g.pipelines[key] = built;   // a failure is remembered, so it fails once
+
+        {
+            std::lock_guard lock(g_pipelinesMutex);
+            g.pipelines[key] = built;   // a failure is remembered, so it fails once
+        }
         return built;
+    }
+
+    namespace warmup
+    {
+        struct QueueItem
+        {
+            Recorded recorded;
+        };
+
+        std::mutex g_warmupMutex;
+        std::condition_variable g_warmupCv;
+        std::deque<QueueItem> g_warmupQueue;
+        std::thread g_warmupThread;
+        std::atomic<bool> g_warmupRunning{ false };
+        std::atomic<bool> g_warmupStopping{ false };
+        std::atomic<bool> g_cutsceneActive{ false };
+
+        std::atomic<uint32_t> g_statQueued{ 0 };
+        std::atomic<uint32_t> g_statCompleted{ 0 };
+        std::atomic<uint32_t> g_statMisses{ 0 };
+        std::atomic<uint32_t> g_statLastCompileMs{ 0 };
+
+        void Worker()
+        {
+#ifdef MW2_ANDROID
+            // Give lowest CPU priority so warmup never contends with game threads or audio mixer
+            setpriority(PRIO_PROCESS, 0, 19);
+#endif
+            LOGI("warmup: scheduler worker thread started");
+            while (!g_warmupStopping.load(std::memory_order_relaxed))
+            {
+                QueueItem item{};
+                {
+                    std::unique_lock lock(g_warmupMutex);
+                    g_warmupCv.wait(lock, [] {
+                        return g_warmupStopping.load(std::memory_order_relaxed) ||
+                               !g_warmupQueue.empty();
+                    });
+
+                    if (g_warmupStopping.load(std::memory_order_relaxed))
+                        break;
+
+                    if (g_warmupQueue.empty())
+                        continue;
+
+                    item = g_warmupQueue.front();
+                    g_warmupQueue.pop_front();
+                }
+
+                PipelineKey key;
+                key.vertexShader = item.recorded.vertexShader;
+                key.pixelShader = item.recorded.pixelShader;
+                key.colourFormat = item.recorded.colourFormat;
+                key.depthFormat = item.recorded.depthFormat;
+                key.topology = item.recorded.topology;
+                key.blendControl = item.recorded.blendControl;
+                key.colourMask = item.recorded.colourMask;
+                key.samples = item.recorded.samples;
+                if (vk::pipeline::LegacyMode())
+                {
+                    key.depthControl = item.recorded.depthControl;
+                    key.modeCntl = item.recorded.modeCntl;
+                }
+
+                // Check if already created
+                {
+                    std::lock_guard lock(g_pipelinesMutex);
+                    if (g.pipelines.find(key) != g.pipelines.end())
+                        continue;
+                }
+
+                const Shader* vertex = nullptr;
+                const Shader* pixel = nullptr;
+                {
+                    std::lock_guard lock(g_shadersMutex);
+                    auto vIt = g.shaders.find(key.vertexShader);
+                    auto pIt = g.shaders.find(key.pixelShader);
+                    if (vIt != g.shaders.end() && vIt->second.module) vertex = &vIt->second;
+                    if (pIt != g.shaders.end() && pIt->second.module) pixel = &pIt->second;
+                }
+
+                if (!vertex || !pixel)
+                    continue;
+
+                const auto start = std::chrono::steady_clock::now();
+                bool made = false;
+                VkPipeline built = EnsurePipeline(key, *vertex, *pixel, &made);
+                const uint32_t tookMs = uint32_t(std::chrono::duration_cast<std::chrono::milliseconds>(
+                    std::chrono::steady_clock::now() - start).count());
+
+                if (built && made)
+                {
+                    const uint32_t c = g_statCompleted.fetch_add(1, std::memory_order_relaxed) + 1;
+                    g_statLastCompileMs.store(tookMs, std::memory_order_relaxed);
+                    LOGI("warmup: precompiled pipeline %016llX/%016llX in %u ms (%u of %u ready)",
+                         (unsigned long long)key.vertexShader, (unsigned long long)key.pixelShader,
+                         tookMs, c, g_statQueued.load(std::memory_order_relaxed));
+
+                    static uint32_t s_lastSave = 0;
+                    if (c - s_lastSave >= 5)
+                    {
+                        s_lastSave = c;
+                        vk::pipeline::SaveCache();
+                    }
+                }
+
+                // Yield to prevent thermal spikes
+                std::this_thread::sleep_for(std::chrono::milliseconds(20));
+            }
+            LOGI("warmup: scheduler worker thread exiting");
+        }
+    }
+
+    void StartWarmupScheduler()
+    {
+        std::lock_guard lock(warmup::g_warmupMutex);
+        if (warmup::g_warmupRunning.load()) return;
+        warmup::g_warmupStopping.store(false);
+        warmup::g_warmupRunning.store(true);
+        warmup::g_warmupThread = std::thread(warmup::Worker);
+    }
+
+    void StopWarmupScheduler()
+    {
+        {
+            std::lock_guard lock(warmup::g_warmupMutex);
+            if (!warmup::g_warmupRunning.load()) return;
+            warmup::g_warmupStopping.store(true);
+            warmup::g_warmupCv.notify_all();
+        }
+        if (warmup::g_warmupThread.joinable())
+            warmup::g_warmupThread.join();
+        warmup::g_warmupRunning.store(false);
+    }
+
+    void SetCutsceneActive(bool active)
+    {
+        warmup::g_cutsceneActive.store(active, std::memory_order_relaxed);
+    }
+
+    WarmupStats GetWarmupStats()
+    {
+        WarmupStats s;
+        s.queued = warmup::g_statQueued.load(std::memory_order_relaxed);
+        s.completed = warmup::g_statCompleted.load(std::memory_order_relaxed);
+        s.misses = warmup::g_statMisses.load(std::memory_order_relaxed);
+        s.lastCompileMs = warmup::g_statLastCompileMs.load(std::memory_order_relaxed);
+        s.cutsceneActive = warmup::g_cutsceneActive.load(std::memory_order_relaxed);
+        return s;
     }
 
     // MW2_SHADER_CACHE=<file> records every pipeline a run needed and rebuilds
@@ -401,6 +578,9 @@ namespace vk::renderer::detail
         std::rename(tmpPath.c_str(), path);
         LOGI("renderer: wrote %zu shaders and %zu pipelines to %s",
              g.shaders.size(), g.recorded.size(), path);
+
+        // Commit driver's persistent pipeline cache alongside recipes
+        vk::pipeline::SaveCache();
     }
 
     // Work the draw path would otherwise do mid-frame, which is where a hitch
@@ -456,6 +636,7 @@ namespace vk::renderer::detail
         std::fclose(file);
 
         g.prewarmWanted = uint32_t(wanted.size());
+        const bool hasFastLibraries = vk::pipeline::PipelineLibraries();
         uint32_t last = 0;
         for (const Recorded& want : wanted)
         {
@@ -478,15 +659,31 @@ namespace vk::renderer::detail
                 key.depthControl = want.depthControl;
                 key.modeCntl = want.modeCntl;
             }
-            if (EnsurePipeline(key, vertex->second, pixel->second)) g.prewarmed++;
-            // Kept, so the cache written at shutdown is the union of this run and earlier
-            // ones. Recording only what this run built would shrink it every time.
-            g.recorded.push_back(want);
 
-            // Progress, because this is the pass a player would be looking at.
-            const uint32_t percent = 100 * (&want - wanted.data() + 1) / uint32_t(wanted.size());
-            if (percent >= last + 25) { LOGI("compiling shaders: %u%%", percent); last = percent; }
+            if (hasFastLibraries)
+            {
+                if (EnsurePipeline(key, vertex->second, pixel->second)) g.prewarmed++;
+                const uint32_t percent = 100 * (&want - wanted.data() + 1) / uint32_t(wanted.size());
+                if (percent >= last + 25) { LOGI("compiling shaders: %u%%", percent); last = percent; }
+            }
+            else
+            {
+                // Enqueue for background warmup scheduler
+                std::lock_guard lock(warmup::g_warmupMutex);
+                warmup::g_warmupQueue.push_back({ want });
+                warmup::g_statQueued.fetch_add(1, std::memory_order_relaxed);
+            }
+            g.recorded.push_back(want);
         }
+
+        if (!hasFastLibraries && !warmup::g_warmupQueue.empty())
+        {
+            LOGI("warmup: queued %u pipelines for background warmup during cutscenes/loading",
+                 warmup::g_statQueued.load(std::memory_order_relaxed));
+            StartWarmupScheduler();
+            warmup::g_warmupCv.notify_all();
+        }
+
         g.prewarmMicroseconds = uint64_t(std::chrono::duration_cast<std::chrono::microseconds>(
             std::chrono::steady_clock::now() - start).count());
         LOGI("renderer: prewarmed %u of %u pipelines over %zu shaders in %llu us",

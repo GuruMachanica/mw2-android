@@ -710,6 +710,19 @@ namespace vk::renderer::detail
     void WriteShaderCache();
     void PrewarmFromCache();
 
+    struct WarmupStats
+    {
+        uint32_t queued = 0;
+        uint32_t completed = 0;
+        uint32_t misses = 0;
+        uint32_t lastCompileMs = 0;
+        bool cutsceneActive = false;
+    };
+    WarmupStats GetWarmupStats();
+    void SetCutsceneActive(bool active);
+    void StartWarmupScheduler();
+    void StopWarmupScheduler();
+
     // ---- renderer_draw.cpp ----
     void ScissorOf(const gpu::RegisterFile& r, VkRect2D& scissor);
 

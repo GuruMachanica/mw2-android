@@ -91,6 +91,7 @@ namespace
         VkDescriptorSetLayout sets[3]{};
         VkPipelineLayout layout = VK_NULL_HANDLE;
         VkPipelineCache cache = VK_NULL_HANDLE;
+        VkPhysicalDeviceProperties deviceProperties{};
         std::string lastError;
     };
     State g;
@@ -516,48 +517,90 @@ namespace
         return nullptr;
     }
 
+    struct PipelineCacheHeader
+    {
+        uint32_t magic = 0x32435056; // 'VPC2' (Vulkan Pipeline Cache 2)
+        uint32_t version = 1;
+        uint32_t vendorID = 0;
+        uint32_t deviceID = 0;
+        uint32_t driverVersion = 0;
+        uint8_t  pipelineCacheUUID[VK_UUID_SIZE]{};
+        uint64_t dataSize = 0;
+    };
+
     void CreateCache()
     {
         std::lock_guard lock(vk::pipeline::CacheMutex());
-        if (g.name.find("Mali") != std::string::npos && !env::Flag("MW2_FORCE_PIPELINE_CACHE"))
+        if (env::Flag("MW2_NO_PIPELINE_CACHE"))
         {
-            LOGI("pipeline: Mali driver detected (%s); persistent VkPipelineCache bypassed to prevent known driver deadlocks",
-                 g.name.c_str());
+            LOGI("pipeline: persistent VkPipelineCache bypassed (MW2_NO_PIPELINE_CACHE)");
             return;
         }
 
         std::vector<uint8_t> initial;
         if (const char* path = CachePath())
         {
-            LOGI("pipeline: using pipeline cache file: %s", path);
+            LOGI("pipeline: checking persistent pipeline cache at: %s", path);
             if (std::FILE* f = std::fopen(path, "rb"))
             {
                 std::fseek(f, 0, SEEK_END);
-                long size = std::ftell(f);
+                const long fileSize = std::ftell(f);
                 std::fseek(f, 0, SEEK_SET);
-                // Sanity bound: maximum 64 MB pipeline cache
-                if (size > 0 && size <= 64 * 1024 * 1024)
+
+                if (fileSize > (long)sizeof(PipelineCacheHeader) && fileSize <= 64 * 1024 * 1024)
                 {
-                    initial.resize(size_t(size));
-                    if (std::fread(initial.data(), 1, initial.size(), f) != initial.size())
-                        initial.clear();
+                    PipelineCacheHeader header{};
+                    if (std::fread(&header, sizeof(header), 1, f) == 1)
+                    {
+                        const bool valid = (header.magic == 0x32435056 &&
+                                            header.version == 1 &&
+                                            header.vendorID == g.deviceProperties.vendorID &&
+                                            header.deviceID == g.deviceProperties.deviceID &&
+                                            header.driverVersion == g.deviceProperties.driverVersion &&
+                                            std::memcmp(header.pipelineCacheUUID, g.deviceProperties.pipelineCacheUUID, VK_UUID_SIZE) == 0 &&
+                                            header.dataSize == (uint64_t)(fileSize - sizeof(PipelineCacheHeader)));
+
+                        if (valid)
+                        {
+                            initial.resize(header.dataSize);
+                            if (std::fread(initial.data(), 1, header.dataSize, f) == header.dataSize)
+                            {
+                                LOGI("pipeline: verified valid cache header for GPU %04X:%04X driver %08X (%zu KB payload)",
+                                     header.vendorID, header.deviceID, header.driverVersion, initial.size() / 1024);
+                            }
+                            else
+                            {
+                                initial.clear();
+                                LOGW("pipeline: truncated cache payload in %s, starting empty", path);
+                            }
+                        }
+                        else
+                        {
+                            LOGW("pipeline: cache header in %s invalidated (driver/device update or UUID mismatch), starting fresh", path);
+                        }
+                    }
+                }
+                else if (fileSize > 0)
+                {
+                    LOGW("pipeline: cache file %s size invalid (%ld bytes), ignoring", path, fileSize);
                 }
                 std::fclose(f);
             }
         }
+
         VkPipelineCacheCreateInfo info{ VK_STRUCTURE_TYPE_PIPELINE_CACHE_CREATE_INFO };
         info.initialDataSize = initial.size();
         info.pInitialData = initial.empty() ? nullptr : initial.data();
-        // A cache the driver rejects is not an error: it starts empty instead.
         if (vkCreatePipelineCache(g.device, &info, nullptr, &g.cache) != VK_SUCCESS)
         {
+            LOGW("pipeline: driver rejected pipeline cache data, falling back to empty cache");
             info.initialDataSize = 0;
             info.pInitialData = nullptr;
             vkCreatePipelineCache(g.device, &info, nullptr, &g.cache);
         }
         else if (!initial.empty())
         {
-            LOGI("pipeline: loaded %zu KB of pipeline cache", initial.size() / 1024);
+            LOGI("pipeline: successfully loaded and verified %zu KB of persistent pipeline cache", initial.size() / 1024);
         }
     }
 
@@ -570,14 +613,23 @@ namespace
         if (vkGetPipelineCacheData(g.device, g.cache, &size, nullptr) != VK_SUCCESS || !size) return;
         std::vector<uint8_t> data(size);
         if (vkGetPipelineCacheData(g.device, g.cache, &size, data.data()) != VK_SUCCESS) return;
+
+        PipelineCacheHeader header{};
+        header.vendorID = g.deviceProperties.vendorID;
+        header.deviceID = g.deviceProperties.deviceID;
+        header.driverVersion = g.deviceProperties.driverVersion;
+        std::memcpy(header.pipelineCacheUUID, g.deviceProperties.pipelineCacheUUID, VK_UUID_SIZE);
+        header.dataSize = size;
+
         std::string tmpPath = std::string(path) + ".tmp";
         if (std::FILE* f = std::fopen(tmpPath.c_str(), "wb"))
         {
-            const size_t written = std::fwrite(data.data(), 1, size, f);
+            const size_t writtenHdr = std::fwrite(&header, sizeof(header), 1, f);
+            const size_t writtenData = std::fwrite(data.data(), 1, size, f);
             const int closed = std::fclose(f);
-            if (written == size && closed == 0 && std::rename(tmpPath.c_str(), path) == 0)
+            if (writtenHdr == 1 && writtenData == size && closed == 0 && std::rename(tmpPath.c_str(), path) == 0)
             {
-                LOGI("pipeline: wrote %zu KB of pipeline cache to %s", size / 1024, path);
+                LOGI("pipeline: wrote verified %zu KB pipeline cache to %s", (size + sizeof(header)) / 1024, path);
             }
             else
             {
@@ -619,6 +671,7 @@ bool vk::pipeline::Initialise(void* device, void* physical, void* queue, uint32_
 
     VkPhysicalDeviceProperties props{};
     vkGetPhysicalDeviceProperties(g.physical, &props);
+    g.deviceProperties = props;
     g.name = props.deviceName;
     // A bug report is read against the driver's known faults.
     if (report::On())
@@ -693,9 +746,7 @@ void*    vk::pipeline::Layout() { return g.layout; }
 void*    vk::pipeline::Cache()
 {
     static const bool noCache = env::Flag("MW2_NO_PIPELINE_CACHE");
-    static const bool isMali = (g.name.find("Mali") != std::string::npos);
-    static const bool forceCache = env::Flag("MW2_FORCE_PIPELINE_CACHE");
-    if (noCache || (isMali && !forceCache)) return nullptr;
+    if (noCache) return nullptr;
     return g.cache;
 }
 void     vk::pipeline::SaveCache() { ::SaveCache(); }
