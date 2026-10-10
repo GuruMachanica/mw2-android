@@ -13,4 +13,6 @@ namespace settings
     int Scale();
     void SetScale(int scale);
 
+    // MW2_LAUNCHER_SOUNDS: 0 keeps the launcher's menus silent. Written by hand.
+    bool Sounds();
 }

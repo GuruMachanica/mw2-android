@@ -91,7 +91,7 @@ twelve hexadecimal digits -- the number the title knows him by -- and a name
 
 The first controller's profile is signed in from the start. It is made the
 first time the game runs, named after the login (or `MW2_NAME`), and is the
-same every run: the file's `first` line names it, and the launcher's PROFILE
+same every run: the file's `first` line names it, and the launcher's PROFILES
 screen puts another there. The online service is not who the player is. Steam
 gives him the name other players see and brings his friends; the lan gives
 him nothing but the network. His rank is the profile's, in files on this
@@ -125,7 +125,7 @@ It lists the profiles of this machine that are not already playing, and "New
 profile", which makes "Player 2" or the next free number. A profile is signed in
 locally (state 1) under the offline XUID `0xE000` over those digits; the title
 names its stats by that XUID and its settings are `profile_<digits>.bin`
-([saves.md](saves.md)). The launcher's PROFILE screen renames one, and puts one
+([saves.md](saves.md)). The launcher's PROFILES screen renames one, and puts one
 at the first controller.
 
 The screen opens for the controller pressed last, since the call does not say

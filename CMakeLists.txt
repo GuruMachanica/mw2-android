@@ -323,7 +323,8 @@ if(MW2_USE_SDL)
     endif()
     set_source_files_properties("${CMAKE_SOURCE_DIR}/launcher/update.cpp" PROPERTIES COMPILE_DEFINITIONS
         "MW2_RELEASE_TAG=\"${MW2_RELEASE_TAG}\";MW2_RELEASE_KIND=\"${MW2_RELEASE_KIND}\"")
-    target_link_libraries(launcher PRIVATE SDL3::SDL3-static)
+    # The decoder the game has for its sound, for the menu sounds (launcher/sound.cpp).
+    target_link_libraries(launcher PRIVATE SDL3::SDL3-static ffmpeg_xma)
     if(WIN32)
         # The program's icon, as Explorer and the taskbar show it.
         enable_language(RC)

@@ -42,10 +42,10 @@ From a terminal: `./mw2-launcher --install path/to/game.iso` (an extracted
 disc folder works too). If the update can't be downloaded, the launcher says
 where to get it and takes the file (`--update <file>`).
 
-The launcher also has PROFILE (set the multiplayer rank and prestige, unlock
-everything, open the campaign's and Special Ops' missions), RESOLUTION (the
-size the game draws at: 720p as on the console, 1440p or 4K, which need a
-faster graphics card) and CHECK FOR UPDATES, which installs a newer release
+The launcher also has PROFILES (set the multiplayer rank and prestige, unlock
+everything, open the campaign's and Special Ops' missions), GRAPHICS (the
+RESOLUTION the game draws at: 720p as on the console, 1440p or 4K, which need
+a faster graphics card) and CHECK FOR UPDATES, which installs a newer release
 over this one.
 
 Something wrong? REPORT A BUG runs the game once with its log kept, then
@@ -75,7 +75,7 @@ Saves go in `saves/` beside the executables.
   the others with `MW2_LAN_ACCEPT=1`.
 
 **Players.** You are a profile, made the first time you play and named after
-your login; your rank is kept under it. The launcher's PROFILE screen renames
+your login; your rank is kept under it. The launcher's PROFILES screen renames
 it, and puts another profile in your place. On Steam other players see your
 Steam name. A second, third or fourth controller signs in on the game's
 sign-in screen, which opens where the game asks for it (SIGN IN PROFILE in

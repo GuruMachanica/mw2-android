@@ -211,7 +211,6 @@ jobs:
           cat > notes.md <<'EOF'
           This release includes:
           - NEW:
-          - NEW:
           - Fixed:
           - Built on ${{ github.sha }}
 

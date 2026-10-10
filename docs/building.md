@@ -163,7 +163,7 @@ it is, the right half in the multiplayer's colours.
 | file | what |
 |---|---|
 | `main.cpp` | the window's loop, what each entry does, the file dialog and dropped files, and the terminal mode |
-| `ui.cpp` | the one screen, drawn by hand: a computed backdrop, the column of entries, the pane, the wordmark |
+| `ui.cpp` | the one screen, drawn by hand: a computed backdrop whose smoke drifts, the column of entries, the pane, the wordmark |
 | `setup.cpp` | the install: checks the disc, gets the update, patches the executables, copies the files |
 | `disc.cpp` | reads a disc image (XDVDFS) or an extracted folder |
 | `package.cpp` | reads the update's package (STFS), as `tools/stfs.py` does |
@@ -171,6 +171,7 @@ it is, the right half in the multiplayer's colours.
 | `update.cpp` | looks for a newer release and puts it in place of the running programs |
 | `report.cpp` | a bug report: a run with its log kept, the system's description, the new-issue page |
 | `settings.cpp` | what the player sets for the game, kept in `.env`, which the game reads as it starts |
+| `sound.cpp` | the game's two menu sounds, read out of the installed `code_post_gfx.ff` at each start and played as the entries are moved through and chosen; none without an install |
 | `profile.cpp` | the profile screen's changes to the files under `saves/` ([saves.md](saves.md#what-the-launcher-changes)) |
 | `playerdata_layout.h` | generated: where the multiplayer's stats file keeps what `profile.cpp` changes |
 
@@ -192,7 +193,7 @@ does the same from a terminal; with no disc it updates the install in place.
 
 The screen is a description (`ui::Frame`) that `main.cpp` fills each frame from
 a list of entries, each with an action and the text the pane shows for it.
-PROFILE and REPORT A BUG swap the list for their own (`ProfileEntries`,
+PROFILES, GRAPHICS and REPORT A BUG swap the list for their own (`ProfileEntries`, `GraphicsEntries`,
 `ReportEntries`); MAPS is an entry without an action yet.
 PLAY CAMPAIGN and PLAY MULTIPLAYER start `mw2-sp` and `mw2-mp` beside the
 launcher, the names a release gives the two game executables.

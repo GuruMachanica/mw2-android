@@ -10,7 +10,8 @@ development run) holds switches as `NAME=value`, one a line. The runtime reads
 it first thing (`runtime/settings.cpp`) and sets each `MW2_` switch the
 environment does not already have, so a variable given on the command line
 decides. The launcher writes its own settings there (RESOLUTION is
-`MW2_SCALE`) and keeps the other lines.
+`MW2_SCALE`) and keeps the other lines. `MW2_LAUNCHER_SOUNDS=0`, written there
+by hand, keeps the launcher's own menus silent.
 
 Switches marked **R** are read by every build. The rest are diagnostic: a build
 without diagnostics (`RELEASE=1 ./build.sh`, `-DMW2_DIAGNOSTICS=OFF`) treats

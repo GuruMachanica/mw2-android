@@ -197,4 +197,7 @@ target_compile_options(ffmpeg_xma PRIVATE -w -std=gnu17 -fno-strict-aliasing -fo
 set_target_properties(ffmpeg_xma PROPERTIES POSITION_INDEPENDENT_CODE ON)
 if(NOT WIN32)
     target_link_libraries(ffmpeg_xma PUBLIC pthread m)
+else()
+    # libavutil's random seed.
+    target_link_libraries(ffmpeg_xma PUBLIC bcrypt)
 endif()

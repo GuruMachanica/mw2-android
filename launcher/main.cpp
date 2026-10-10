@@ -13,6 +13,7 @@
 #include "profile.h"
 #include "report.h"
 #include "settings.h"
+#include "sound.h"
 #include "setup.h"
 #include "ui.h"
 #include "update.h"
@@ -191,8 +192,8 @@ namespace
         // The profile screen and what it does.
         Profile, Back, NextPlayer, Rename, PlayAs, MaxRank, Prestige, UnlockEverything, UnlockMissions, AllStars,
         CheckUpdate, InstallUpdate,
-        // The next of the sizes the game draws at.
-        Resolution,
+        // The graphics screen, and the next of the sizes the game draws at.
+        Graphics, Resolution,
         // The bug report screen: a run of either game with its log kept.
         Report, ReportCampaign, ReportMultiplayer,
         // The question a start asks when a recorded run was never reported.
@@ -237,6 +238,7 @@ namespace
         std::string updated;            // the version this start is the first of
         bool gameRunning = false;       // looked up once a second while the profile screen shows
         bool reportScreen = false;
+        bool graphicsScreen = false;
         bool recording = false;         // the reported run goes on
         bool pendingReport = false;     // a recorded run was never reported: the start asks about it
         std::chrono::steady_clock::time_point recordingSince{};
@@ -350,11 +352,13 @@ namespace
                 break;
             case Action::Profile:
             case Action::Report:
+            case Action::Graphics:
             case Action::Back:
                 gameRunning = action == Action::Profile && GameRunning();
                 gameChecked = std::chrono::steady_clock::now();
                 profileScreen = action == Action::Profile;
                 reportScreen = action == Action::Report;
+                graphicsScreen = action == Action::Graphics;
                 message.clear();
                 messageIsError = false;
                 focusPlaced = false;
@@ -600,6 +604,38 @@ namespace
             return entries;
         }
 
+        // The graphics screen.
+        std::vector<Entry> GraphicsEntries() const
+        {
+            std::vector<Entry> entries;
+            auto add = [&](Action action, std::string label, const char* heading, std::string text) {
+                Entry entry;
+                entry.shown.label = std::move(label);
+                entry.action = action;
+                entry.heading = heading;
+                entry.text = std::move(text);
+                entries.push_back(std::move(entry));
+                return &entries.back();
+            };
+            static const char* const kSizes[] = { "720P", "1440P", "4K" };
+            const int scale = settings::Scale();
+            add(Action::Resolution, std::string("RESOLUTION ") + kSizes[scale - 1], "RESOLUTION",
+                std::string("The size the game draws at, whatever the window's: now ") + std::to_string(1280 * scale) + "x" +
+                std::to_string(720 * scale) + (scale == 1 ? ", the console's own." : ".") +
+                "\n\nChoose to go to the next: 720p, 1440p, 4K. A larger one is sharper and needs a faster graphics card: "
+                "1440p draws four times the pixels and 4K nine times."
+                "\n\nIt applies to the campaign and the multiplayer, from the next time either is started.");
+            add(Action::None, "FPS LIMIT", "FPS LIMIT", "How many frames a second the game draws at most.\n\nNot available yet.");
+            add(Action::None, "FOV", "FIELD OF VIEW", "How wide the game's view is.\n\nNot available yet.");
+            for (size_t i = 1; i < entries.size(); i++)
+            {
+                entries[i].shown.enabled = false;
+                entries[i].shown.tag = "SOON";
+            }
+            add(Action::Back, "BACK", "", "")->shown.ruleAbove = true;
+            return entries;
+        }
+
         // A file the dialog returned, or one dropped on the window.
         void Take(Action forAction, const std::string& path)
         {
@@ -684,6 +720,7 @@ namespace
                                "\nthen choose the file with CHOOSE UPDATE FILE.";
                 job.reset();
                 state = setup::Detect();
+                sound::Load();
                 focusPlaced = false;
             }
         }
@@ -708,6 +745,7 @@ namespace
             }
             if (profileScreen) return ProfileEntries();
             if (reportScreen) return ReportEntries();
+            if (graphicsScreen) return GraphicsEntries();
             std::vector<Entry> entries;
             auto add = [&](Action action, std::string label, bool enabled, const char* heading, std::string text) {
                 Entry entry;
@@ -737,37 +775,31 @@ namespace
             add(Action::PlayMultiplayer, "PLAY MULTIPLAYER", installed && multiplayer, "MULTIPLAYER",
                 play(multiplayer, kMultiplayer, "Multiplayer: split screen, system link and private matches."));
 
-            Entry* install = nullptr;
-            if (needsUpdateFile)
-                install = add(Action::ChooseUpdate, "CHOOSE UPDATE FILE", true, "TITLE UPDATE 6",
-                              "The update could not be downloaded. Choose the file you downloaded yourself.");
-            else if (state == setup::State::NeedsUpdate)
-                install = add(Action::Install, "UPDATE GAME", true, "UPDATE",
-                              "The game is installed from the disc, and this version plays title update 6.\n\n"
-                              "The update is downloaded (2 MB) and applied to the installed game. Your disc is not needed.");
-            else
-                install = add(Action::Install, installed ? "REINSTALL" : "INSTALL GAME", true, "INSTALL",
-                              std::string("Choose the image of your Xbox 360 disc (.iso), or drop it on this window.\n\n"
-                                          "Its files, about 7 GB, are copied into the game folder beside the launcher") +
-                                  (setup::UsesUpdate() ? ", and title update 6 is downloaded (2 MB) and applied." : ".") +
-                                  "\n\nThe disc is the USA/Europe one, version 1.0.557.");
-            install->shown.ruleAbove = true;
+            // Until the game is whole, installing it is the next thing to do.
+            auto install = [&] {
+                if (needsUpdateFile)
+                    return add(Action::ChooseUpdate, "CHOOSE UPDATE FILE", true, "TITLE UPDATE 6",
+                               "The update could not be downloaded. Choose the file you downloaded yourself.");
+                if (state == setup::State::NeedsUpdate)
+                    return add(Action::Install, "UPDATE GAME", true, "UPDATE",
+                               "The game is installed from the disc, and this version plays title update 6.\n\n"
+                               "The update is downloaded (2 MB) and applied to the installed game. Your disc is not needed.");
+                return add(Action::Install, installed ? "REINSTALL" : "INSTALL GAME", true, "INSTALL",
+                           std::string("Choose the image of your Xbox 360 disc (.iso), or drop it on this window.\n\n"
+                                       "Its files, about 7 GB, are copied into the game folder beside the launcher") +
+                               (setup::UsesUpdate() ? ", and title update 6 is downloaded (2 MB) and applied." : ".") +
+                               "\n\nThe disc is the USA/Europe one, version 1.0.557.");
+            };
+            const bool reinstall = installed && !needsUpdateFile;
+            if (!reinstall) install()->shown.ruleAbove = true;
 
-            add(Action::Profile, "PROFILE", true, "PROFILE",
+            // What the game is played with.
+            add(Action::Graphics, "GRAPHICS", true, "GRAPHICS", "The size the game draws at.")->shown.ruleAbove = true;
+            add(Action::Profile, "PROFILES", true, "PROFILES",
                 "Set the multiplayer rank and prestige, unlock everything, and open the campaign's and Special Ops' missions.");
-            {
-                static const char* const kSizes[] = { "720P", "1440P", "4K" };
-                const int scale = settings::Scale();
-                add(Action::Resolution, std::string("RESOLUTION ") + kSizes[scale - 1], true, "RESOLUTION",
-                    std::string("The size the game draws at, whatever the window's: now ") + std::to_string(1280 * scale) + "x" +
-                    std::to_string(720 * scale) + (scale == 1 ? ", the console's own." : ".") +
-                    "\n\nChoose to go to the next: 720p, 1440p, 4K. A larger one is sharper and needs a faster graphics card: "
-                    "1440p draws four times the pixels and 4K nine times."
-                    "\n\nIt applies to the campaign and the multiplayer, from the next time either is started.");
-            }
-            // What an install is for, once there is more than playing it.
             add(Action::None, "MAPS", false, "MAPS", "Add and remove custom maps.\n\nNot available yet.")->shown.tag = "SOON";
-            // A build nobody released has no version to compare.
+
+            // The copy itself. A build nobody released has no version to compare.
             const bool released = *update::Current() != 0;
             if (newer)
                 add(Action::InstallUpdate, "UPDATE TO " + release.version, true, "UPDATES",
@@ -778,6 +810,7 @@ namespace
                 add(Action::CheckUpdate, "CHECK FOR UPDATES", released, "UPDATES",
                     released ? std::string("Look for a newer version than this one, ") + update::Current() + "."
                              : std::string("This build was not made as a release, so there is no version to compare."))->shown.ruleAbove = true;
+            if (reinstall) install();
             add(Action::Report, "REPORT A BUG", true, "REPORT A BUG",
                 "Something wrong with the game? Send the game's report data to GitHub.\n\nA GitHub account is required.");
             add(Action::Quit, "QUIT", true, "", "")->shown.ruleAbove = true;
@@ -810,18 +843,27 @@ namespace
             SDL_DestroySurface(icon);
         }
         SDL_SetRenderVSync(renderer, 1);
+        // In front, with the keyboard's focus: SDL hears no controller for a
+        // window that has not got it, and a window the system opened behind
+        // another -- it does when the program starting it was not in front --
+        // answers to nothing but the mouse until it is clicked.
+        SDL_RaiseWindow(app.window);
 
         IMGUI_CHECKVERSION();
         ImGui::CreateContext();
         ImGuiIO& io = ImGui::GetIO();
         io.IniFilename = nullptr;       // nothing is kept between runs
         io.ConfigFlags |= ImGuiConfigFlags_NavEnableKeyboard | ImGuiConfigFlags_NavEnableGamepad;
+        // A held direction goes through the entries at a pace each one can be
+        // seen and heard at: Dear ImGui's own, 20 a second, is a text cursor's.
+        io.KeyRepeatRate = 0.10f;
         ImGui_ImplSDL3_InitForSDLRenderer(app.window, renderer);
         ImGui_ImplSDLRenderer3_Init(renderer);
         const ui::Fonts fonts = ui::LoadFonts(scale);
-        SDL_Texture* backdrop = ui::MakeBackdrop(renderer);
+        ui::Backdrop backdrop = ui::MakeBackdrop(renderer);
 
         app.state = setup::Detect();
+        sound::Load();
         app.updated = updated;
         app.pendingReport = report::Pending() && !GameRunning();
         while (!app.quit)
@@ -853,6 +895,7 @@ namespace
 
             const std::vector<Entry> entries = app.Entries();
             const int count = int(entries.size());
+            const bool placed = app.focusPlaced;
             if (!app.focusPlaced)
             {
                 // The first thing a player can do.
@@ -875,8 +918,9 @@ namespace
             if (app.renaming || typed) { app.focus = focusBefore; chosen = -1; }
             if (app.renaming || typed) {}
             else if (app.job && pressed({ ImGuiKey_Escape, ImGuiKey_GamepadFaceRight }, false)) app.job->progress.cancel = true;
-            else if ((app.profileScreen || (app.reportScreen && !app.recording)) && pressed({ ImGuiKey_Escape, ImGuiKey_GamepadFaceRight }, false))
+            else if ((app.profileScreen || app.graphicsScreen || (app.reportScreen && !app.recording)) && pressed({ ImGuiKey_Escape, ImGuiKey_GamepadFaceRight }, false))
             {
+                sound::Play(sound::Clip::Click);
                 app.Do(Action::Back);
                 ImGui::EndFrame();
                 continue;
@@ -919,11 +963,15 @@ namespace
             if (*update::Current()) frame.corner = std::string(update::Current()) + "   " + frame.corner;
             if (!app.updated.empty()) frame.status = "Updated to " + app.updated + ". " + frame.status;
             frame.hint = app.recording                          ? ""
-                         : app.profileScreen || app.reportScreen ? "ENTER OR (A) TO CHOOSE, ESC OR (B) TO GO BACK"
+                         : app.profileScreen || app.reportScreen || app.graphicsScreen ? "ENTER OR (A) TO CHOOSE, ESC OR (B) TO GO BACK"
                                                                  : "ENTER OR (A) TO CHOOSE";
 
             const int pointed = ui::Draw(fonts, frame, scale, app.focus);
             if (pointed >= 0) chosen = pointed;
+            // The game's menus tick as another entry is reached and sound a
+            // choice; a screen that has just come up has reached nothing.
+            if (app.focus != focusBefore && placed) sound::Play(sound::Clip::Over);
+            if (chosen >= 0 && entries[chosen].shown.enabled) sound::Play(sound::Clip::Click);
             // Reading a message dismisses it: the next move shows the entries' own text again.
             if (chosen >= 0 && !app.messageIsError) app.message.clear();
             if (chosen >= 0 && chosen != app.focus) app.focus = chosen;
@@ -932,7 +980,7 @@ namespace
             ImGui::Render();
             SDL_SetRenderDrawColor(renderer, 40, 40, 38, 255);
             SDL_RenderClear(renderer);
-            if (backdrop) SDL_RenderTexture(renderer, backdrop, nullptr, nullptr);
+            ui::DrawBackdrop(renderer, backdrop, double(SDL_GetTicks()) / 1000.0);
             ImGui_ImplSDLRenderer3_RenderDrawData(ImGui::GetDrawData(), renderer);
             SDL_RenderPresent(renderer);
         }
@@ -941,7 +989,7 @@ namespace
         ImGui_ImplSDLRenderer3_Shutdown();
         ImGui_ImplSDL3_Shutdown();
         ImGui::DestroyContext();
-        SDL_DestroyTexture(backdrop);
+        ui::DestroyBackdrop(backdrop);
         SDL_DestroyRenderer(renderer);
         SDL_DestroyWindow(app.window);
         SDL_Quit();
