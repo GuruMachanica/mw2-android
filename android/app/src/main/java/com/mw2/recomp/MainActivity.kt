@@ -142,11 +142,20 @@ class MainActivity : AppCompatActivity() {
             }
         } else {
             val candidateIsos = listOf(
+                File("/sdcard/Download/mw2_campaign_lean.iso"),
                 File("/sdcard/Download/mw2.iso"),
                 File("/sdcard/Download/Call of Duty - Modern Warfare 2 (USA, Europe).iso"),
+                File(getExternalFilesDir(null) ?: filesDir, "mw2_campaign_lean.iso"),
                 File(getExternalFilesDir(null) ?: filesDir, "mw2.iso")
             )
-            detectedIsoFile = candidateIsos.firstOrNull { it.exists() && it.length() > 500_000_000L }
+            val downloadFolder = File("/sdcard/Download")
+            val anyDownloadIso = if (downloadFolder.exists() && downloadFolder.isDirectory) {
+                downloadFolder.listFiles { f ->
+                    f.isFile && f.name.endsWith(".iso", ignoreCase = true) && f.length() > 500_000_000L
+                }?.firstOrNull()
+            } else null
+
+            detectedIsoFile = candidateIsos.firstOrNull { it.exists() && it.length() > 500_000_000L } ?: anyDownloadIso
 
             if (detectedIsoFile != null) {
                 play.isEnabled = true

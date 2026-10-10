@@ -197,18 +197,28 @@ namespace
         for (const Title& title : kTitles)
         {
             const auto* file = source->Find(title.xex);
-            std::vector<uint8_t> bytes;
-            if (!file || !source->ReadAll(*file, bytes))
+            if (!file)
             {
-                error = std::string("There is no ") + title.xex + " in " + Utf8(from) +
-                        ": it is not a Modern Warfare 2 disc.";
+                if (std::string(title.xex) == kXex)
+                {
+                    error = std::string("There is no ") + title.xex + " in " + Utf8(from) +
+                            ": it is not a Modern Warfare 2 disc.";
+                    return false;
+                }
+                continue;
+            }
+            std::vector<uint8_t> bytes;
+            if (!source->ReadAll(*file, bytes))
+            {
+                error = std::string("Could not read ") + title.xex + " from " + Utf8(from);
                 return false;
             }
             if (Sha256(bytes) != title.sha256) { error = WrongDisc(title.xex, bytes); return false; }
         }
         for (const auto& file : source->Files())
             if (IsGameFile(file.name)) files.push_back(&file);
-        for (const Title& title : kTitles) files.push_back(source->Find(title.xex));
+        for (const Title& title : kTitles)
+            if (const auto* file = source->Find(title.xex)) files.push_back(file);
 
         const fs::path folder = g_gameFolder;
         std::error_code ec;
