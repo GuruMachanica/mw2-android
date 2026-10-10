@@ -884,10 +884,18 @@ namespace
         // to be externally synchronised for a present as for a submission. Two
         // holds rather than one, so a submission of the renderer's can go
         // between them.
+        VkResult submitRes = VK_SUCCESS;
         {
             std::lock_guard queueLock(vk::pipeline::QueueMutex());
-            vk::pipeline::Failed(vkQueueSubmit(g.queue, 1, &submit, frame.inFlight),
-                                 "the presenter's submission");
+            submitRes = vkQueueSubmit(g.queue, 1, &submit, frame.inFlight);
+        }
+        if (submitRes != VK_SUCCESS)
+        {
+            vk::pipeline::Failed(submitRes, "the presenter's submission");
+            VkSubmitInfo emptySubmit{ VK_STRUCTURE_TYPE_SUBMIT_INFO };
+            std::lock_guard queueLock(vk::pipeline::QueueMutex());
+            vkQueueSubmit(g.queue, 1, &emptySubmit, frame.inFlight);
+            return;
         }
         // The copy is in the queue ahead of anything the renderer submits from
         // now on, so the renderer may draw over the image.

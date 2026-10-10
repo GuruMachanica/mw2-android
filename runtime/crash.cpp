@@ -281,12 +281,25 @@ namespace
             auto batch = gpu::detail::CurrentBatchStatus();
             if (batch.inBatch && batch.elapsedMs >= 4000)
             {
+                const char* drawStage = gpu::detail::CurrentDrawStage();
+                const bool isCompiling = drawStage && std::strstr(drawStage, "Draw_EnsurePipeline") != nullptr;
                 uint32_t sec = uint32_t(batch.elapsedMs / 1000);
-                if (sec != lastLoggedSec && (sec % 3 == 0 || sec == 4))
+                if (isCompiling && batch.elapsedMs < 60000)
+                {
+                    if (sec != lastLoggedSec && sec % 5 == 0)
+                    {
+                        lastLoggedSec = sec;
+                        auto opcode = gpu::detail::CurrentOpcodeStatus();
+                        std::fprintf(stderr, "[I] Shader compilation in progress (%llu ms): stage=%s, vHash=%016llX, pHash=%016llX\n",
+                                     (unsigned long long)batch.elapsedMs, drawStage,
+                                     (unsigned long long)opcode.lastVertexHash, (unsigned long long)opcode.lastPixelHash);
+                        std::fflush(stderr);
+                    }
+                }
+                else if (sec != lastLoggedSec && (sec % 3 == 0 || sec == 4))
                 {
                     lastLoggedSec = sec;
                     auto opcode = gpu::detail::CurrentOpcodeStatus();
-                    const char* drawStage = gpu::detail::CurrentDrawStage();
                     std::fprintf(stderr, "\n[E] ==================================================\n");
                     std::fprintf(stderr, "[E] HANG DETECTED: GPU ring batch running for %llu ms!\n", (unsigned long long)batch.elapsedMs);
                     std::fprintf(stderr, "[E]   Batch stats: available=%u, readIndex=%u, wptr=%u\n", batch.available, batch.readIndex, batch.wptr);

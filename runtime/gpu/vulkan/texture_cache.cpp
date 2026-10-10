@@ -345,7 +345,14 @@ namespace
             buffer = VK_NULL_HANDLE;
             return false;
         }
-        vkBindBufferMemory(g.device, buffer, memory, 0);
+        if (vkBindBufferMemory(g.device, buffer, memory, 0) != VK_SUCCESS)
+        {
+            vkFreeMemory(g.device, memory, nullptr);
+            memory = VK_NULL_HANDLE;
+            vkDestroyBuffer(g.device, buffer, nullptr);
+            buffer = VK_NULL_HANDLE;
+            return false;
+        }
         return true;
     }
 

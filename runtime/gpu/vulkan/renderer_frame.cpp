@@ -208,7 +208,10 @@ namespace vk::renderer::detail
             // this slot waits for ever.
             if (!ended || vk::pipeline::Failed(vkQueueSubmit(queue, 1, &submit, fence),
                                                "a frame's submission"))
-                vkQueueSubmit(queue, 0, nullptr, fence);
+            {
+                VkSubmitInfo emptySubmit{ VK_STRUCTURE_TYPE_SUBMIT_INFO };
+                vkQueueSubmit(queue, 1, &emptySubmit, fence);
+            }
         });
         slot.inFlight = true;
         slot.serial = ++g.submissionSerial;
@@ -231,8 +234,14 @@ namespace vk::renderer::detail
         VkResult res = vkWaitForFences(g.device, 1, &slot.fence, VK_TRUE, 2000000000ull);
         if (res == VK_TIMEOUT)
         {
-            LOGW("renderer: waiting for %s took >2 seconds; continuing wait...", what);
-            res = vkWaitForFences(g.device, 1, &slot.fence, VK_TRUE, UINT64_MAX);
+            LOGW("renderer: waiting for %s took >2 seconds; waiting up to 5s...", what);
+            res = vkWaitForFences(g.device, 1, &slot.fence, VK_TRUE, 5000000000ull);
+        }
+        if (res == VK_TIMEOUT)
+        {
+            LOGE("renderer: fence wait timed out for %s; aborting wait to avoid permanent hang", what);
+            slot.inFlight = false;
+            return false;
         }
         if (vk::pipeline::Failed(res, what))
             return false;

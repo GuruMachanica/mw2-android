@@ -513,10 +513,18 @@ void vk::renderer::Draw(const gpu::RegisterFile& r, const DrawCall& call)
                              return EnsurePipeline(key, *vertex, *pixel, &newPipeline); }();
     if (!built) { Skip("pipeline rejected"); return; }
     if (newPipeline && ShaderCachePath())
+    {
         g.recorded.push_back({ key.vertexShader, key.pixelShader,
                                uint32_t(colourTarget->format), uint32_t(depthTarget->format),
                                key.topology, depthControl, key.blendControl,
                                key.colourMask, modeCntl, key.samples });
+        static uint32_t s_lastSaved = 0;
+        if (g.recorded.size() - s_lastSaved >= 5)
+        {
+            s_lastSaved = uint32_t(g.recorded.size());
+            WriteShaderCache();
+        }
+    }
 
     // What each slot is declared as, so a texture of another kind is not bound
     // there. The two stages share the set; where both sample a slot the pixel
