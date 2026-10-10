@@ -295,6 +295,7 @@ if(MW2_USE_SDL)
         "${MW2_FONTS_SOURCE}"
         "${CMAKE_SOURCE_DIR}/runtime/install/crypto.cpp"
         "${CMAKE_SOURCE_DIR}/runtime/install/xex.cpp"
+        "${CMAKE_SOURCE_DIR}/runtime/install/spawn.cpp"
         "${imgui_SOURCE_DIR}/imgui.cpp"
         "${imgui_SOURCE_DIR}/imgui_draw.cpp"
         "${imgui_SOURCE_DIR}/imgui_tables.cpp"

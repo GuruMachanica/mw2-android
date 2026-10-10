@@ -1,6 +1,6 @@
 #include "download.h"
 #include "disc.h"
-#include "spawn.h"
+#include "../runtime/install/spawn.h"
 
 #ifdef _WIN32
 #include <windows.h>

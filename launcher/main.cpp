@@ -16,7 +16,7 @@
 #include "setup.h"
 #include "ui.h"
 #include "update.h"
-#include "spawn.h"
+#include "../runtime/install/spawn.h"
 
 #ifdef _WIN32
 #include <windows.h>

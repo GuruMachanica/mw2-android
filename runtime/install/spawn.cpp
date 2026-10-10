@@ -1,5 +1,7 @@
 #include "spawn.h"
 
+#if __has_include(<SDL3/SDL.h>)
+
 #ifdef _WIN32
 #include <windows.h>
 #endif
@@ -37,3 +39,4 @@ SDL_Process* spawn::Start(const char* const* args, SDL_Environment* environment)
     SDL_DestroyProperties(properties);
     return process;
 }
+#endif

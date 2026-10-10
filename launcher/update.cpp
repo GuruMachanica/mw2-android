@@ -2,7 +2,7 @@
 #include "disc.h"
 #include "download.h"
 #include "../runtime/install/crypto.h"
-#include "spawn.h"
+#include "../runtime/install/spawn.h"
 
 #include <SDL3/SDL.h>
 
