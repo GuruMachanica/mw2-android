@@ -16,7 +16,7 @@
 /XenonRecomp/
 
 # ---- generated C++ (~2.2M lines, 64 MB) ----
-/ppc/
+# /ppc/ (Campaign recompiled sources committed for CI builds)
 
 # ---- generated switch tables (XenonAnalyse output, rebuilt by build.sh) ----
 config/mw2_switch_tables.toml

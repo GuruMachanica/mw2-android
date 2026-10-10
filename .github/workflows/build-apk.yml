@@ -1,0 +1,128 @@
+name: Build Android APK
+
+on:
+  workflow_dispatch:
+    inputs:
+      title:
+        description: "Which title to build"
+        type: choice
+        options: [campaign]
+        default: campaign
+      build_type:
+        description: "Build variant"
+        type: choice
+        options: [release, debug]
+        default: release
+      upload_release:
+        description: "Upload APK directly to GitHub Release"
+        type: boolean
+        default: true
+      release_tag:
+        description: "GitHub Release tag to attach to"
+        type: string
+        default: "v0.0.1"
+  push:
+    branches: [ master ]
+    paths:
+      - 'android/**'
+      - 'runtime/**'
+      - 'launcher/**'
+      - 'ppc/**'
+      - 'cmake/**'
+      - 'CMakeLists.txt'
+      - '.github/workflows/build-apk.yml'
+  release:
+    types: [ published ]
+
+permissions:
+  contents: write
+
+env:
+  NDK_VERSION: "28.2.13676358"
+
+jobs:
+  build:
+    name: Build Android APK
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Set up JDK 17
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: "17"
+
+      - name: Install Toolchain & SIMDe
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y ninja-build ccache cmake
+          if [ ! -d "XenonRecomp/thirdparty/simde" ]; then
+            mkdir -p XenonRecomp/thirdparty
+            git clone --depth 1 https://github.com/simd-everywhere/simde.git XenonRecomp/thirdparty/simde
+          fi
+
+      - name: Install Android NDK & CMake
+        run: |
+          sdkmanager="$ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager"
+          yes | "$sdkmanager" --licenses > /dev/null 2>&1 || true
+          "$sdkmanager" --install "ndk;$NDK_VERSION" "cmake;3.22.1"
+          echo "ANDROID_NDK_HOME=$ANDROID_HOME/ndk/$NDK_VERSION" >> "$GITHUB_ENV"
+
+      - name: Fetch libadrenotools
+        run: |
+          chmod +x android/fetch_deps.sh
+          ./android/fetch_deps.sh
+
+      - name: Setup Gradle
+        uses: gradle/actions/setup-gradle@v4
+        with:
+          gradle-version: "8.11.1"
+
+      - name: Build Campaign APK
+        working-directory: android
+        env:
+          MW2_NDK_VERSION: ${{ env.NDK_VERSION }}
+          MW2_BUILD_SHA: ${{ github.sha }}
+        run: |
+          chmod +x gradlew
+          case "${{ github.event.inputs.build_type || 'release' }}" in
+            debug)   task="assembleCampaignDebug" ;;
+            *)       task="assembleCampaignRelease" ;;
+          esac
+          ./gradlew "$task" --no-daemon --stacktrace
+
+      - name: Verify APK
+        run: |
+          tools=$(ls -d "$ANDROID_HOME"/build-tools/* | sort -V | tail -1)
+          case "${{ github.event.inputs.build_type || 'release' }}" in
+            debug)   dir="debug"; apk_name="app-campaign-debug.apk" ;;
+            *)       dir="release"; apk_name="app-campaign-release.apk" ;;
+          esac
+          apk_path="android/app/build/outputs/apk/campaign/$dir/$apk_name"
+          ls -lh "$apk_path"
+          "$tools/apksigner" verify --verbose "$apk_path"
+
+      - name: Upload APK Artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: app-campaign-${{ github.event.inputs.build_type || 'release' }}
+          path: android/app/build/outputs/apk/campaign/*/*.apk
+          retention-days: 30
+
+      - name: Upload to GitHub Release
+        if: github.event_name == 'release' || github.event.inputs.upload_release == true || github.event.inputs.upload_release == 'true' || github.event_name == 'push'
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          TAG="${{ github.event.release.tag_name || github.event.inputs.release_tag || 'v0.0.1' }}"
+          case "${{ github.event.inputs.build_type || 'release' }}" in
+            debug)   dir="debug"; apk_name="app-campaign-debug.apk" ;;
+            *)       dir="release"; apk_name="app-campaign-release.apk" ;;
+          esac
+          apk_path="android/app/build/outputs/apk/campaign/$dir/$apk_name"
+          echo "Uploading $apk_path to release $TAG..."
+          gh release upload "$TAG" "$apk_path" --clobber -R "${{ github.repository }}" || echo "Release upload skipped (release $TAG may not exist yet or lacks write permissions)"
