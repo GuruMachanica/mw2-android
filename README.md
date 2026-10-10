@@ -85,6 +85,8 @@ This is **not an emulator**: Xbox 360 PowerPC machine instructions are translate
 2. Run `mw2-launcher` and select **INSTALL GAME**, pointing it to your game ISO.
 3. Choose **PLAY CAMPAIGN** or **PLAY MULTIPLAYER**.
 
+The launcher also features PROFILES (set multiplayer rank and prestige, unlock everything, open campaign and Special Ops missions), GRAPHICS (the RESOLUTION the game draws at: 720p, 1440p, or 4K), and CHECK FOR UPDATES, which updates newer releases in place.
+
 ---
 
 ## Controls & Keybindings
@@ -98,7 +100,7 @@ This is **not an emulator**: Xbox 360 PowerPC machine instructions are translate
 - **Customize Layout**: Open pause menu → **Edit controls** to drag, resize, or adjust transparency of any button.
 - **Physical Gamepad**: Bluetooth or USB Xbox/PlayStation controllers are automatically detected.
 
-### Multiplayer & Profiles
+**Players & Profiles.** You are a profile, made the first time you play and named after your login; your rank is kept under it. The launcher's PROFILES screen renames it, and puts another profile in your place. On Steam other players see your Steam name. A second, third or fourth controller signs in on the game's sign-in screen, which opens where the game asks for it (SIGN IN PROFILE in split screen, SYSTEM LINK) or with the Guide button (or Back and Start together): choose a profile, which keeps its own rank and settings, or make a new one. Two copies of `mw2-mp` on one PC can play a SYSTEM LINK match, each with the controller that chose SYSTEM LINK in it.
 
 - **Steam**: With Steam running, the game shows as *Spacewar*. Without it, the `steam` download plays as the `lan` one does, with a rank of its own. Host a PLAY ONLINE → PRIVATE MATCH, invite from Steam's friend list (or `F6`).
 - **LAN**: SYSTEM LINK finds games on the network automatically. For private matches, the lobby's "Invite friends" invites everyone on the network.

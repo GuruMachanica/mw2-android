@@ -78,6 +78,34 @@ namespace
         });
     }
 
+    // What is plugged in, said whenever it changes: a controller the game does
+    // not answer to is either not here at all, here as a joystick SDL has no
+    // layout for, or one SDL was told to ignore.
+    void SayDevices()
+    {
+        static std::string said = "?";
+        int count = 0;
+        SDL_JoystickID* ids = SDL_GetJoysticks(&count);
+        std::string now;
+        for (int i = 0; ids && i < count; i++)
+        {
+            const char* name = SDL_GetJoystickNameForID(ids[i]);
+            char text[160];
+            std::snprintf(text, sizeof text, "%s%s (%04X:%04X, %s)", i ? ", " : "", name ? name : "unnamed",
+                          SDL_GetJoystickVendorForID(ids[i]), SDL_GetJoystickProductForID(ids[i]),
+                          SDL_IsGamepad(ids[i]) ? "a gamepad" : "no gamepad layout known");
+            now += text;
+        }
+        SDL_free(ids);
+        if (now == said) return;
+        said = now;
+        if (now.empty()) LOGI("input: no controller is plugged in, as far as SDL sees");
+        else LOGI("input: plugged in: %s", now.c_str());
+        for (const char* hint : { SDL_HINT_GAMECONTROLLER_IGNORE_DEVICES, SDL_HINT_GAMECONTROLLER_IGNORE_DEVICES_EXCEPT })
+            if (const char* value = SDL_GetHint(hint); value && *value)
+                LOGI("input: SDL is told %s=%s", hint, value);
+    }
+
     SDL_Gamepad* PadFor(uint32_t user)
     {
         if (user >= 4) return nullptr;
@@ -95,6 +123,7 @@ namespace
         if (!g_pads[user] && now - lastLook[user] >= std::chrono::seconds(1))
         {
             lastLook[user] = now;
+            if (user == 0) SayDevices();
             int count = 0;
             SDL_JoystickID* ids = SDL_GetGamepads(&count);
             if (ids)

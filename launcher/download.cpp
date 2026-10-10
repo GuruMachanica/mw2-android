@@ -4,7 +4,7 @@
 
 #include "download.h"
 #include "disc.h"
-#include "spawn.h"
+#include "../runtime/install/spawn.h"
 
 #ifndef _WIN32
 #include <SDL3/SDL.h>

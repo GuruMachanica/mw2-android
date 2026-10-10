@@ -79,7 +79,10 @@ namespace
     void SetEnvironment(const char* name, const char* value)
     {
 #ifdef _WIN32
+        // Both copies: the C library's, which getenv reads, and the process's
+        // own, which the Steam client writes and SDL reads.
         _putenv_s(name, value ? value : "");
+        SetEnvironmentVariableA(name, value);
 #else
         if (value) setenv(name, value, 1);
         else unsetenv(name);
@@ -241,13 +244,23 @@ namespace
         static SdlSettings Now()
         {
             SdlSettings settings;
-            for (char** entry = environ; *entry; entry++)
-            {
-                const std::string text = *entry;
+            auto keep = [&](const std::string& text) {
                 const size_t equals = text.find('=');
                 if (text.rfind("SDL_", 0) == 0 && equals != std::string::npos)
                     settings.values.emplace_back(text.substr(0, equals), text.substr(equals + 1));
+            };
+#ifdef _WIN32
+            // The process's own block, not `environ`: the Steam client sets its
+            // variables with SetEnvironmentVariable, which the C library's
+            // copy never hears of -- and SDL reads this one.
+            if (char* block = GetEnvironmentStringsA())
+            {
+                for (const char* entry = block; *entry; entry += std::strlen(entry) + 1) keep(entry);
+                FreeEnvironmentStringsA(block);
             }
+#else
+            for (char** entry = environ; *entry; entry++) keep(*entry);
+#endif
             return settings;
         }
 

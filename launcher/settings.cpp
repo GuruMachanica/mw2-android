@@ -43,3 +43,9 @@ void settings::SetScale(int scale)
     g_kept["MW2_SCALE"] = std::to_string(std::clamp(scale, 1, kMaxScale));
     Save();
 }
+
+bool settings::Sounds()
+{
+    const auto kept = g_kept.find("MW2_LAUNCHER_SOUNDS");
+    return kept == g_kept.end() || kept->second != "0";
+}

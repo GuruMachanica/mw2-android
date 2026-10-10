@@ -273,5 +273,6 @@ elseif(ANDROID)
     # bionic carries pthread and libm inside libc.
     target_link_libraries(ffmpeg_xma PUBLIC m)
 elseif(WIN32)
+    # libavutil's random seed.
     target_link_libraries(ffmpeg_xma PUBLIC bcrypt)
 endif()

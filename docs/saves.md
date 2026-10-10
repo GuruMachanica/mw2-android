@@ -119,7 +119,7 @@ horizontal margin, vertical margin, then the content notice) is:
 
 ## What the launcher changes
 
-The launcher's PROFILE screen (`launcher/profile.cpp`) edits two of these files
+The launcher's PROFILES screen (`launcher/profile.cpp`) edits two of these files
 itself, without the title; each is copied to `<name>.backup` before its first
 change.
 

@@ -27,7 +27,16 @@ namespace ui
     Fonts LoadFonts(float scale);
 
     // The backdrop, made once: there is no artwork to ship, so it is computed.
-    SDL_Texture* MakeBackdrop(SDL_Renderer* renderer);
+    // Its smoke drifts, so it is drawn for a time.
+    struct Backdrop
+    {
+        SDL_Texture* smoke[2] = {};
+        SDL_Texture* shade = nullptr;
+        SDL_Texture* glow = nullptr;
+    };
+    Backdrop MakeBackdrop(SDL_Renderer* renderer);
+    void DrawBackdrop(SDL_Renderer* renderer, const Backdrop& backdrop, double seconds);
+    void DestroyBackdrop(Backdrop& backdrop);
 
     struct Entry
     {

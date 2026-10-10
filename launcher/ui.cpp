@@ -24,19 +24,29 @@ namespace
         h = (h ^ (h >> 13)) * 1274126177u;
         return float((h ^ (h >> 16)) & 0xFFFF) / 65535.0f;
     }
-    float Noise(float x, float y)
+    // `period` cells across, after which it repeats: 0 for never.
+    float Noise(float x, float y, int period = 0)
     {
         const int xi = int(std::floor(x)), yi = int(std::floor(y));
         float fx = x - float(xi), fy = y - float(yi);
         fx = fx * fx * (3 - 2 * fx);
         fy = fy * fy * (3 - 2 * fy);
-        const float a = Hash(xi, yi), b = Hash(xi + 1, yi), c = Hash(xi, yi + 1), d = Hash(xi + 1, yi + 1);
+        const int x0 = period ? xi % period : xi, x1 = period ? (xi + 1) % period : xi + 1;
+        const float a = Hash(x0, yi), b = Hash(x1, yi), c = Hash(x0, yi + 1), d = Hash(x1, yi + 1);
         return a + (b - a) * fx + (c - a) * fy + (a - b - c + d) * fx * fy;
     }
     float Smoke(float x, float y)
     {
         float sum = 0, weight = 0.5f;
         for (int octave = 0; octave < 5; octave++, x *= 2.03f, y *= 2.03f, weight *= 0.5f) sum += Noise(x, y) * weight;
+        return sum;
+    }
+    // The same, repeating every `period` cells of x (x from 0), so that a
+    // picture of it can follow itself across the window.
+    float SmokeAround(float x, float y, int period)
+    {
+        float sum = 0, weight = 0.5f;
+        for (int octave = 0; octave < 5; octave++, x *= 2, y *= 2, period *= 2, weight *= 0.5f) sum += Noise(x, y, period) * weight;
         return sum;
     }
 
@@ -74,42 +84,106 @@ ui::Fonts ui::LoadFonts(float scale)
     return fonts;
 }
 
-SDL_Texture* ui::MakeBackdrop(SDL_Renderer* renderer)
+// The backdrop in four pictures, so that the smoke can move under the rest:
+// two layers of smoke, each repeating across its width; the shade the smoke
+// is seen in, which multiplies them; and the glow, which is added.
+ui::Backdrop ui::MakeBackdrop(SDL_Renderer* renderer)
 {
     constexpr int kWidth = 640, kHeight = 360;
+    // A layer holds the smoke as a factor about 1, and 1 is kept at this
+    // much of white so that a brighter wisp has room; the shade makes up for it.
+    constexpr float kOne = 0.75f;
     std::vector<uint8_t> pixels(size_t(kWidth) * kHeight * 4);
-    for (int y = 0; y < kHeight; y++)
-        for (int x = 0; x < kWidth; x++)
-        {
-            const float u = float(x) / kWidth, v = float(y) / kHeight;
-            // Grey smoke, lit from the upper right, darker toward the bottom.
-            float grey = 0.47f - 0.24f * v;
-            grey += (Smoke(u * 3.1f + 7, v * 2.3f + 3) - 0.48f) * 0.30f;
-            const float lx = (u - 0.70f) * 1.78f, ly = v - 0.18f;
-            grey += 0.16f * std::exp(-(lx * lx + ly * ly) * 3.2f);
-            // The column the entries stand in.
-            grey *= 0.74f + 0.26f * std::clamp((u - 0.318f) * 60.0f, 0.0f, 1.0f);
-            // The corners fall away.
-            const float cx = u - 0.5f, cy = v - 0.5f;
-            grey *= 1.0f - 0.55f * std::pow(cx * cx + cy * cy, 1.2f);
-            // The glow in the bottom left corner.
-            const float gx = (u - 0.02f) * 1.78f, gy = v - 1.06f;
-            const float glow = std::exp(-(gx * gx * 1.1f + gy * gy * 2.6f) * 2.4f) *
-                               (0.75f + 0.5f * Smoke(u * 4.0f, v * 4.0f + 11));
-            const float r = grey + glow * 0.95f, g = grey + glow * 0.66f, b = grey * 0.98f + glow * 0.06f;
-            // A little grain keeps the gradients from banding.
-            const float grain = (Hash(x * 3 + 1, y * 7 + 5) - 0.5f) * 0.018f;
-            uint8_t* p = &pixels[(size_t(y) * kWidth + x) * 4];
-            p[0] = uint8_t(std::clamp(r + grain, 0.0f, 1.0f) * 255);
-            p[1] = uint8_t(std::clamp(g + grain, 0.0f, 1.0f) * 255);
-            p[2] = uint8_t(std::clamp(b + grain, 0.0f, 1.0f) * 255);
-            p[3] = 255;
-        }
-    SDL_Texture* texture = SDL_CreateTexture(renderer, SDL_PIXELFORMAT_RGBA32, SDL_TEXTUREACCESS_STATIC, kWidth, kHeight);
-    if (!texture) return nullptr;
-    SDL_UpdateTexture(texture, nullptr, pixels.data(), kWidth * 4);
-    SDL_SetTextureScaleMode(texture, SDL_SCALEMODE_LINEAR);
-    return texture;
+    auto texture = [&](SDL_BlendMode blend) -> SDL_Texture* {
+        SDL_Texture* made = SDL_CreateTexture(renderer, SDL_PIXELFORMAT_RGBA32, SDL_TEXTUREACCESS_STATIC, kWidth, kHeight);
+        if (!made) return nullptr;
+        SDL_UpdateTexture(made, nullptr, pixels.data(), kWidth * 4);
+        SDL_SetTextureScaleMode(made, SDL_SCALEMODE_LINEAR);
+        SDL_SetTextureBlendMode(made, blend);
+        return made;
+    };
+    auto fill = [&](auto&& colour) {
+        for (int y = 0; y < kHeight; y++)
+            for (int x = 0; x < kWidth; x++)
+            {
+                float rgb[3];
+                colour(x, y, float(x) / kWidth, float(y) / kHeight, rgb);
+                uint8_t* p = &pixels[(size_t(y) * kWidth + x) * 4];
+                for (int c = 0; c < 3; c++) p[c] = uint8_t(std::clamp(rgb[c], 0.0f, 1.0f) * 255);
+                p[3] = 255;
+            }
+    };
+
+    Backdrop backdrop;
+    // The two layers differ in grain and in place, and the second is drawn
+    // faintly over the first.
+    constexpr struct { int cells; float tall, across, down; } kLayers[2] = { { 3, 2.3f, 0, 3 }, { 4, 3.1f, 0, 41 } };
+    for (int layer = 0; layer < 2; layer++)
+    {
+        const auto& l = kLayers[layer];
+        fill([&](int, int, float u, float v, float* rgb) {
+            const float smoke = SmokeAround(u * l.cells + l.across, v * l.tall + l.down, l.cells);
+            rgb[0] = rgb[1] = rgb[2] = kOne * (1.0f + (smoke - 0.48f) * 1.05f);
+        });
+        backdrop.smoke[layer] = texture(layer ? SDL_BLENDMODE_BLEND : SDL_BLENDMODE_NONE);
+        if (layer && backdrop.smoke[layer]) SDL_SetTextureAlphaMod(backdrop.smoke[layer], 80);
+    }
+
+    fill([&](int x, int y, float u, float v, float* rgb) {
+        // Lit from the upper right, darker toward the bottom.
+        float grey = 0.47f - 0.24f * v;
+        const float lx = (u - 0.70f) * 1.78f, ly = v - 0.18f;
+        grey += 0.16f * std::exp(-(lx * lx + ly * ly) * 3.2f);
+        // The column the entries stand in.
+        grey *= 0.74f + 0.26f * std::clamp((u - 0.318f) * 60.0f, 0.0f, 1.0f);
+        // The corners fall away.
+        const float cx = u - 0.5f, cy = v - 0.5f;
+        grey *= 1.0f - 0.55f * std::pow(cx * cx + cy * cy, 1.2f);
+        // A little grain keeps the gradients from banding.
+        grey = (grey + (Hash(x * 3 + 1, y * 7 + 5) - 0.5f) * 0.018f) / kOne;
+        rgb[0] = rgb[1] = grey;
+        rgb[2] = grey * 0.98f;
+    });
+    backdrop.shade = texture(SDL_BLENDMODE_MOD);
+
+    fill([&](int, int, float u, float v, float* rgb) {
+        // The glow in the bottom left corner.
+        const float gx = (u - 0.02f) * 1.78f, gy = v - 1.06f;
+        const float glow = std::exp(-(gx * gx * 1.1f + gy * gy * 2.6f) * 2.4f) * (0.75f + 0.5f * Smoke(u * 4.0f, v * 4.0f + 11));
+        rgb[0] = glow * 0.95f;
+        rgb[1] = glow * 0.66f;
+        rgb[2] = glow * 0.06f;
+    });
+    backdrop.glow = texture(SDL_BLENDMODE_ADD);
+    return backdrop;
+}
+
+void ui::DrawBackdrop(SDL_Renderer* renderer, const Backdrop& backdrop, double seconds)
+{
+    int width = 0, height = 0;
+    SDL_GetCurrentRenderOutputSize(renderer, &width, &height);
+    // Widths of the window a second, leftward: the first layer drifts right
+    // and the fainter one, slower, left, as the smoke of the game's menus does.
+    constexpr double kDrift[2] = { -1.0 / 32, 1.0 / 50 };
+    for (int layer = 0; layer < 2; layer++)
+    {
+        if (!backdrop.smoke[layer]) continue;
+        double turn = std::fmod(seconds * kDrift[layer], 1.0);
+        if (turn < 0) turn += 1;
+        // The picture and, where it has left the window, itself again.
+        const float left = -float(turn * width);
+        const SDL_FRect first{ left, 0, float(width), float(height) }, second{ left + float(width), 0, float(width), float(height) };
+        SDL_RenderTexture(renderer, backdrop.smoke[layer], nullptr, &first);
+        SDL_RenderTexture(renderer, backdrop.smoke[layer], nullptr, &second);
+    }
+    if (backdrop.shade) SDL_RenderTexture(renderer, backdrop.shade, nullptr, nullptr);
+    if (backdrop.glow) SDL_RenderTexture(renderer, backdrop.glow, nullptr, nullptr);
+}
+
+void ui::DestroyBackdrop(Backdrop& backdrop)
+{
+    for (SDL_Texture* texture : { backdrop.smoke[0], backdrop.smoke[1], backdrop.shade, backdrop.glow }) SDL_DestroyTexture(texture);
+    backdrop = {};
 }
 
 int ui::Draw(const Fonts& fonts, const Frame& frame, float scale, int& focus)

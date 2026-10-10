@@ -1,6 +1,7 @@
 #include "install.h"
 #include "crypto.h"
 #include "xex.h"
+#include "spawn.h"
 #include "../log.h"
 
 #include <cstdio>
@@ -87,7 +88,7 @@ namespace
         if (!fs::is_regular_file(launcher, ec)) return false;
         const std::string path = Utf8(launcher);
         const char* const args[] = { path.c_str(), nullptr };
-        SDL_Process* process = SDL_CreateProcess(args, false);
+        SDL_Process* process = spawn::Start(args);
         if (!process) { LOGE("cannot start %s: %s", path.c_str(), SDL_GetError()); return false; }
         SDL_DestroyProcess(process);    // forgets it; the launcher keeps running
         return true;
@@ -482,11 +483,7 @@ void install::StartNextTitle()
     SDL_SetEnvironmentVariable(environment, "MW2_LOG_APPEND", "1", true);
     const std::string path = Utf8(file);
     const char* const args[] = { path.c_str(), nullptr };
-    SDL_PropertiesID properties = SDL_CreateProperties();
-    SDL_SetPointerProperty(properties, SDL_PROP_PROCESS_CREATE_ARGS_POINTER, const_cast<char**>(args));
-    SDL_SetPointerProperty(properties, SDL_PROP_PROCESS_CREATE_ENVIRONMENT_POINTER, environment);
-    SDL_Process* process = SDL_CreateProcessWithProperties(properties);
-    SDL_DestroyProperties(properties);
+    SDL_Process* process = spawn::Start(args, environment);
     if (!process) { ShowError("cannot start " + path + ": " + SDL_GetError()); return; }
     SDL_DestroyProcess(process);
     LOGI("started %s", path.c_str());
