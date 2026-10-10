@@ -245,9 +245,10 @@ void* android::driver::Open(std::string& error)
             g_handle = nullptr;
         }
         // Its refusals are silent, so the reason is worth narrowing down.
+        const char* err = dlerror();
         LOGW("driver: adrenotools could not load %s (%s); driver dir %s, hooks %s,"
              " redirect %s", g_libraryName.c_str(),
-             dlerror() ? dlerror() : "it refused before opening anything",
+             err ? err : "it refused before opening anything",
              Exists(AsDirectory(g_directory) + g_libraryName) ? "ok" : "MISSING",
              Exists(hooks + "libmain_hook.so") ? "ok" : "MISSING",
              Exists(redirect) ? "ok" : "MISSING");

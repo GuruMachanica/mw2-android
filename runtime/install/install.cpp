@@ -227,10 +227,34 @@ namespace
 
         uint64_t needed = 0;
         std::vector<const install::Source::File*> copy;
+        const fs::path canonicalFolder = folder.lexically_normal();
         for (const auto* file : files)
         {
-            const fs::path to = folder / install::FromUtf8(file->name);
-            if (fs::is_regular_file(to, ec) && fs::file_size(to, ec) == file->size) continue;
+            if (file->name.empty() || file->name == "." || file->name == ".." ||
+                file->name.find('/') != std::string::npos || file->name.find('\\') != std::string::npos)
+                continue;
+            const fs::path to = (folder / install::FromUtf8(file->name)).lexically_normal();
+            if (to.parent_path() != canonicalFolder) continue;
+
+            if (fs::is_regular_file(to, ec) && fs::file_size(to, ec) == file->size)
+            {
+                if (file->size > 0)
+                {
+                    char headDisk[64] = {}, headSrc[64] = {};
+                    const size_t checkLen = std::min<size_t>(64, size_t(file->size));
+                    std::ifstream in(to, std::ios::binary);
+                    if (in.read(headDisk, checkLen) && size_t(in.gcount()) == checkLen &&
+                        source->Read(*file, 0, headSrc, checkLen) &&
+                        std::memcmp(headDisk, headSrc, checkLen) == 0)
+                    {
+                        continue;
+                    }
+                }
+                else
+                {
+                    continue;
+                }
+            }
             copy.push_back(file);
             needed += file->size;
         }

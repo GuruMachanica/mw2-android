@@ -95,7 +95,17 @@ for idx, filename in enumerate(files_to_compress, 1):
     # Give extra moment for file flush
     time.sleep(0.5)
 
-    if os.path.exists(TEMP_OUT) and os.path.getsize(TEMP_OUT) > 1000:
+    is_valid_bink = False
+    if proc.poll() == 0 and os.path.exists(TEMP_OUT) and os.path.getsize(TEMP_OUT) > 1000:
+        try:
+            with open(TEMP_OUT, "rb") as f:
+                magic = f.read(3)
+                if magic in (b"BIK", b"KB2"):
+                    is_valid_bink = True
+        except Exception:
+            pass
+
+    if is_valid_bink:
         size_after = os.path.getsize(TEMP_OUT)
         shutil.move(TEMP_OUT, src_path)
         reduction = (1 - (size_after / size_before)) * 100
@@ -103,6 +113,11 @@ for idx, filename in enumerate(files_to_compress, 1):
         total_after += size_after
         success_count += 1
     else:
+        if os.path.exists(TEMP_OUT):
+            try:
+                os.remove(TEMP_OUT)
+            except Exception:
+                pass
         print(" Failed, keeping original.")
         total_after += size_before
 

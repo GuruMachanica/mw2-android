@@ -98,14 +98,36 @@ class DriverStore(private val context: Context) {
                 return Outcome.Failed(context.getString(R.string.driver_not_arm64))
             }
 
-            val name = json.optString("name", suggestedName).ifEmpty { suggestedName }
-            val target = File(root, safeName(name))
-            target.deleteRecursively()
-            if (!content.renameTo(target)) {
-                content.copyRecursively(target, overwrite = true)
+            val minApi = json.optInt("minApi", 0)
+            if (minApi > 0 && android.os.Build.VERSION.SDK_INT < minApi) {
+                return Outcome.Failed("Driver requires Android API $minApi (device has ${android.os.Build.VERSION.SDK_INT})")
             }
-            val driver = read(target) ?: return Outcome.Failed(context.getString(R.string.driver_bad_zip))
-            return Outcome.Imported(driver)
+
+            val name = json.optString("name", suggestedName).ifEmpty { suggestedName }
+            val driverFolderName = safeName(name)
+            val target = File(root, driverFolderName).canonicalFile
+            val rootCanonical = root.canonicalFile
+            if (!target.path.startsWith(rootCanonical.path + File.separator)) {
+                return Outcome.Failed(context.getString(R.string.driver_bad_zip))
+            }
+
+            val tempTarget = File(root, ".import-${System.currentTimeMillis()}").canonicalFile
+            tempTarget.deleteRecursively()
+            if (!content.renameTo(tempTarget)) {
+                content.copyRecursively(tempTarget, overwrite = true)
+            }
+            val driver = read(tempTarget)
+            if (driver == null) {
+                tempTarget.deleteRecursively()
+                return Outcome.Failed(context.getString(R.string.driver_bad_zip))
+            }
+            target.deleteRecursively()
+            if (!tempTarget.renameTo(target)) {
+                tempTarget.copyRecursively(target, overwrite = true)
+                tempTarget.deleteRecursively()
+            }
+            val finalDriver = read(target) ?: return Outcome.Failed(context.getString(R.string.driver_bad_zip))
+            return Outcome.Imported(finalDriver)
         } catch (error: Throwable) {
             return Outcome.Failed(error.message ?: context.getString(R.string.driver_bad_zip))
         } finally {
@@ -114,14 +136,19 @@ class DriverStore(private val context: Context) {
     }
 
     fun remove(driver: Driver) {
-        driver.directory.deleteRecursively()
+        val canonicalDir = driver.directory.canonicalFile
+        val rootCanonical = root.canonicalFile
+        if (canonicalDir.path.startsWith(rootCanonical.path + File.separator)) {
+            canonicalDir.deleteRecursively()
+        }
     }
 
     private fun safeName(name: String): String {
         val cleaned = name
-            .map { if (it.isLetterOrDigit() || it == '.' || it == '-' || it == '_') it else '_' }
+            .map { if (it.isLetterOrDigit() || it == '-' || it == '_') it else '_' }
             .joinToString("")
-        return cleaned.trim('_').ifEmpty { "driver" }.take(48)
+        val result = cleaned.trim('_', '.').ifEmpty { "driver" }.take(48)
+        return if (result == "." || result == ".." || result.isEmpty()) "driver" else result
     }
 
     /**

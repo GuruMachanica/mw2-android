@@ -211,6 +211,7 @@ class InstallActivity : AppCompatActivity() {
                         )
                         .setPositiveButton(R.string.close, null)
                         .show()
+                    return@setPositiveButton
                 }
                 copyIn(uri, destination, size)
             }
@@ -252,6 +253,9 @@ class InstallActivity : AppCompatActivity() {
                 if (!copying) {
                     destination.delete()
                     failure = getString(R.string.install_cancelled)
+                } else if (size > 0 && copied < size) {
+                    destination.delete()
+                    failure = "Incomplete copy: expected $size bytes, got $copied bytes"
                 }
             } catch (error: Throwable) {
                 destination.delete()

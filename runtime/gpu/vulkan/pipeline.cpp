@@ -220,29 +220,6 @@ bool vk::pipeline::CreateDevice(void* physicalDevice, uint32_t family,
     // draw it is used in, and can be compiled when the title loads it rather
     // than at the first draw -- which is what the console does, where a
     // shader is ready the moment it is loaded.
-    VkPhysicalDeviceDynamicRenderingFeaturesKHR dynamicRendering{
-        VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_DYNAMIC_RENDERING_FEATURES_KHR };
-    VkPhysicalDeviceExtendedDynamicStateFeaturesEXT dynamicState{
-        VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_EXTENDED_DYNAMIC_STATE_FEATURES_EXT };
-    VkPhysicalDeviceGraphicsPipelineLibraryFeaturesEXT libraries{
-        VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_GRAPHICS_PIPELINE_LIBRARY_FEATURES_EXT };
-    {
-        dynamicRendering.pNext = &dynamicState;
-        dynamicState.pNext = &libraries;
-        VkPhysicalDeviceFeatures2 query{ VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_FEATURES_2 };
-        query.pNext = &dynamicRendering;
-        vkGetPhysicalDeviceFeatures2(physical, &query);
-    }
-    // Both of these were extensions once and are core in Vulkan 1.3, and a
-    // driver that has them in core is under no obligation to still list them
-    // as extensions -- most phone drivers do not. Asking only for the
-    // extension string turned a perfectly capable device away, which is what
-    // happened on an Adreno 710: the feature bits were set, the strings were
-    // absent, and the renderer went headless.
-    //
-    // So the feature is what is asked about; the extension name is only
-    // added to the device when it really is one, because naming an extension
-    // the driver does not have is itself an error.
     VkPhysicalDeviceProperties deviceProperties{};
     vkGetPhysicalDeviceProperties(physical, &deviceProperties);
     const bool core13 = deviceProperties.apiVersion >= VK_API_VERSION_1_3;
@@ -251,6 +228,40 @@ bool vk::pipeline::CreateDevice(void* physicalDevice, uint32_t family,
         DeviceHasExtension(physical, VK_KHR_DYNAMIC_RENDERING_EXTENSION_NAME);
     const bool dynamicStateExtension =
         DeviceHasExtension(physical, VK_EXT_EXTENDED_DYNAMIC_STATE_EXTENSION_NAME);
+    const bool pipelineLibrariesExtension =
+        DeviceHasExtension(physical, VK_EXT_GRAPHICS_PIPELINE_LIBRARY_EXTENSION_NAME);
+
+    VkPhysicalDeviceDynamicRenderingFeaturesKHR dynamicRendering{
+        VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_DYNAMIC_RENDERING_FEATURES_KHR };
+    VkPhysicalDeviceExtendedDynamicStateFeaturesEXT dynamicState{
+        VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_EXTENDED_DYNAMIC_STATE_FEATURES_EXT };
+    VkPhysicalDeviceGraphicsPipelineLibraryFeaturesEXT libraries{
+        VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_GRAPHICS_PIPELINE_LIBRARY_FEATURES_EXT };
+
+    {
+        VkPhysicalDeviceFeatures2 query{ VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_FEATURES_2 };
+        void** tail = &query.pNext;
+        if (core13 || dynamicRenderingExtension)
+        {
+            *tail = &dynamicRendering;
+            tail = &dynamicRendering.pNext;
+        }
+        if (core13 || dynamicStateExtension)
+        {
+            *tail = &dynamicState;
+            tail = &dynamicState.pNext;
+        }
+        if (pipelineLibrariesExtension)
+        {
+            *tail = &libraries;
+            tail = &libraries.pNext;
+        }
+        if (query.pNext)
+        {
+            vkGetPhysicalDeviceFeatures2(physical, &query);
+        }
+    }
+
     const bool hasDynamicRendering =
         dynamicRendering.dynamicRendering && (dynamicRenderingExtension || core13);
     const bool hasDynamicState =
@@ -507,6 +518,7 @@ namespace
 
     void CreateCache()
     {
+        std::lock_guard lock(vk::pipeline::CacheMutex());
         std::vector<uint8_t> initial;
         if (const char* path = CachePath())
         {
@@ -515,7 +527,8 @@ namespace
                 std::fseek(f, 0, SEEK_END);
                 long size = std::ftell(f);
                 std::fseek(f, 0, SEEK_SET);
-                if (size > 0)
+                // Sanity bound: maximum 64 MB pipeline cache
+                if (size > 0 && size <= 64 * 1024 * 1024)
                 {
                     initial.resize(size_t(size));
                     if (std::fread(initial.data(), 1, initial.size(), f) != initial.size())
@@ -542,16 +555,19 @@ namespace
 
     void SaveCache()
     {
+        std::lock_guard lock(vk::pipeline::CacheMutex());
         const char* path = CachePath();
         if (!path || !g.cache) return;
         size_t size = 0;
         if (vkGetPipelineCacheData(g.device, g.cache, &size, nullptr) != VK_SUCCESS || !size) return;
         std::vector<uint8_t> data(size);
         if (vkGetPipelineCacheData(g.device, g.cache, &size, data.data()) != VK_SUCCESS) return;
-        if (std::FILE* f = std::fopen(path, "wb"))
+        std::string tmpPath = std::string(path) + ".tmp";
+        if (std::FILE* f = std::fopen(tmpPath.c_str(), "wb"))
         {
             std::fwrite(data.data(), 1, size, f);
             std::fclose(f);
+            std::rename(tmpPath.c_str(), path);
             LOGI("pipeline: wrote %zu KB of pipeline cache to %s", size / 1024, path);
         }
     }
@@ -656,6 +672,7 @@ bool     vk::pipeline::HasExtendedDynamicState() { return g.hasExtendedDynamicSt
 bool     vk::pipeline::LegacyMode() { return g.legacyMode; }
 bool     vk::pipeline::TextureCompressionBC() { return g.textureCompressionBC; }
 std::mutex& vk::pipeline::QueueMutex() { static std::mutex m; return m; }
+std::mutex& vk::pipeline::CacheMutex() { static std::mutex m; return m; }
 void*    vk::pipeline::SetLayout(uint32_t set) { return set < 3 ? g.sets[set] : nullptr; }
 void*    vk::pipeline::Layout() { return g.layout; }
 void*    vk::pipeline::Cache()

@@ -534,10 +534,27 @@ void vk::renderer::Draw(const gpu::RegisterFile& r, const DrawCall& call)
 
     VkViewport viewport{};
     ViewportOf(r, scissor, viewport);
+
+    if (scissor.offset.x < 0)
+    {
+        if (int32_t(scissor.extent.width) + scissor.offset.x <= 0) { Skip("scissor off-screen"); return; }
+        scissor.extent.width = uint32_t(int32_t(scissor.extent.width) + scissor.offset.x);
+        scissor.offset.x = 0;
+    }
+    if (scissor.offset.y < 0)
+    {
+        if (int32_t(scissor.extent.height) + scissor.offset.y <= 0) { Skip("scissor off-screen"); return; }
+        scissor.extent.height = uint32_t(int32_t(scissor.extent.height) + scissor.offset.y);
+        scissor.offset.y = 0;
+    }
+    if (uint32_t(scissor.offset.x) >= g.currentWidth || uint32_t(scissor.offset.y) >= g.currentHeight)
+    { Skip("scissor outside target"); return; }
+
     scissor.extent.width = std::min(scissor.extent.width,
                                     g.currentWidth - uint32_t(scissor.offset.x));
     scissor.extent.height = std::min(scissor.extent.height,
                                      g.currentHeight - uint32_t(scissor.offset.y));
+    if (!scissor.extent.width || !scissor.extent.height) { Skip("empty scissor"); return; }
 
     State::Bound& bound = g.bound;
     DrawOp op;

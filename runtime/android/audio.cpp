@@ -117,9 +117,14 @@ namespace
             std::memset(out, 0, size_t(wanted) * kOutChannels * sizeof(float));
             // The ring is still drained, so unpausing does not play a stale
             // second of audio from before the player left the game.
-            static std::vector<float> sink;
-            sink.resize(size_t(wanted) * kOutChannels);
-            g_ring.Pop(sink.data(), wanted);
+            float discard[64 * kOutChannels];
+            uint32_t remaining = wanted;
+            while (remaining > 0)
+            {
+                const uint32_t chunk = std::min(remaining, 64u);
+                if (g_ring.Pop(discard, chunk) == 0) break;
+                remaining -= chunk;
+            }
             return AAUDIO_CALLBACK_RESULT_CONTINUE;
         }
 
@@ -135,27 +140,31 @@ namespace
             return AAUDIO_CALLBACK_RESULT_CONTINUE;
         }
 
-        // Linear resampling, for a device AAudio opened at another rate.
+        // True linear interpolation resampling, for a device AAudio opened at another rate.
         const double step = double(kGuestRate) / double(g_deviceRate);
-        float pair[2];
+        static float nextSample[2] = { 0.0f, 0.0f };
         for (uint32_t i = 0; i < wanted; i++)
         {
             while (g_resamplePosition >= 1.0)
             {
+                g_lastSample[0] = nextSample[0];
+                g_lastSample[1] = nextSample[1];
+                float pair[2];
                 if (g_ring.Pop(pair, 1) == 1)
                 {
-                    g_lastSample[0] = pair[0];
-                    g_lastSample[1] = pair[1];
+                    nextSample[0] = pair[0];
+                    nextSample[1] = pair[1];
                 }
                 else
                 {
                     g_underruns.fetch_add(1, std::memory_order_relaxed);
-                    g_lastSample[0] = g_lastSample[1] = 0;
+                    nextSample[0] = nextSample[1] = 0.0f;
                 }
                 g_resamplePosition -= 1.0;
             }
-            out[i * 2] = g_lastSample[0];
-            out[i * 2 + 1] = g_lastSample[1];
+            const float frac = float(g_resamplePosition);
+            out[i * 2]     = g_lastSample[0] + frac * (nextSample[0] - g_lastSample[0]);
+            out[i * 2 + 1] = g_lastSample[1] + frac * (nextSample[1] - g_lastSample[1]);
             g_resamplePosition += step;
         }
         return AAUDIO_CALLBACK_RESULT_CONTINUE;

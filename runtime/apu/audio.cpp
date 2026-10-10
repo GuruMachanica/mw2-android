@@ -203,10 +203,12 @@ namespace
                     g_wake.wait_until(guard, pick->next);
                     continue;
                 }
-                // Resynchronise if falling too far behind (e.g. process paused or long frame)
-                if (pick->next + 20 * kFrameInterval < now)
-                    pick->next = now;
-                pick->next += kFrameInterval;
+                // Resynchronise if falling behind (e.g. process paused or long frame)
+                // to prevent rapid burst catch-up callbacks
+                if (pick->next + kFrameInterval < now)
+                    pick->next = now + kFrameInterval;
+                else
+                    pick->next += kFrameInterval;
                 callback = pick->callback;
                 context = pick->context;
             }

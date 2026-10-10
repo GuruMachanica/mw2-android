@@ -69,7 +69,12 @@ namespace
         info.pStages = stage;
         info.layout = Layout();
         VkPipeline made = VK_NULL_HANDLE;
-        if (vkCreateGraphicsPipelines(g.device, Cache(), 1, &info, nullptr, &made) != VK_SUCCESS)
+        VkResult res = VK_SUCCESS;
+        {
+            std::lock_guard cacheLock(vk::pipeline::CacheMutex());
+            res = vkCreateGraphicsPipelines(g.device, Cache(), 1, &info, nullptr, &made);
+        }
+        if (res != VK_SUCCESS)
             return VK_NULL_HANDLE;
         return made;
     }

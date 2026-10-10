@@ -310,8 +310,12 @@ namespace vk::renderer::detail
              key.colourFormat, key.depthFormat, key.topology, key.samples, (void*)renderPass);
 
         VkPipeline built = VK_NULL_HANDLE;
-        VkResult res = vkCreateGraphicsPipelines(g.device, static_cast<VkPipelineCache>(vk::pipeline::Cache()),
-                                                1, &info, nullptr, &built);
+        VkResult res = VK_SUCCESS;
+        {
+            std::lock_guard cacheLock(vk::pipeline::CacheMutex());
+            res = vkCreateGraphicsPipelines(g.device, static_cast<VkPipelineCache>(vk::pipeline::Cache()),
+                                            1, &info, nullptr, &built);
+        }
         const uint64_t tookMs = uint64_t(std::chrono::duration_cast<std::chrono::milliseconds>(
             std::chrono::steady_clock::now() - compileStart).count());
         if (res != VK_SUCCESS)
@@ -371,7 +375,8 @@ namespace vk::renderer::detail
     {
         const char* path = ShaderCachePath();
         if (!path || g.recorded.empty()) return;
-        std::FILE* file = std::fopen(path, "wb");
+        const std::string tmpPath = std::string(path) + ".tmp";
+        std::FILE* file = std::fopen(tmpPath.c_str(), "wb");
         if (!file) return;
 
         const uint32_t header[4] = { kCacheMagic, kCacheVersion,
@@ -387,6 +392,7 @@ namespace vk::renderer::detail
         }
         std::fwrite(g.recorded.data(), sizeof(Recorded), g.recorded.size(), file);
         std::fclose(file);
+        std::rename(tmpPath.c_str(), path);
         LOGI("renderer: wrote %zu shaders and %zu pipelines to %s",
              g.shaders.size(), g.recorded.size(), path);
     }
@@ -400,12 +406,25 @@ namespace vk::renderer::detail
         std::FILE* file = std::fopen(path, "rb");
         if (!file) return;
 
+        std::fseek(file, 0, SEEK_END);
+        const long fileSize = std::ftell(file);
+        std::fseek(file, 0, SEEK_SET);
+        if (fileSize < 16) { std::fclose(file); return; }
+
         uint32_t header[4]{};
         if (std::fread(header, sizeof header, 1, file) != 1 ||
             header[0] != kCacheMagic || header[1] != kCacheVersion)
         {
             std::fclose(file);
             LOGW("renderer: %s is not a shader cache for this build, ignoring it", path);
+            return;
+        }
+
+        // Sanity bound: max 50,000 shaders or pipelines
+        if (header[2] > 50000 || header[3] > 50000)
+        {
+            std::fclose(file);
+            LOGW("renderer: %s has invalid header counts (%u, %u), ignoring it", path, header[2], header[3]);
             return;
         }
 
@@ -416,6 +435,7 @@ namespace vk::renderer::detail
             uint32_t entry[2]{};
             if (std::fread(&hash, sizeof hash, 1, file) != 1 ||
                 std::fread(entry, sizeof entry, 1, file) != 1) { std::fclose(file); return; }
+            if (entry[1] > 256 * 1024) { std::fclose(file); return; } // Max 1 MB shader
             std::vector<uint32_t> code(entry[1]);
             if (entry[1] && std::fread(code.data(), 4, code.size(), file) != code.size())
             { std::fclose(file); return; }
@@ -447,6 +467,11 @@ namespace vk::renderer::detail
             key.blendControl = want.blendControl;
             key.colourMask = want.colourMask;
             key.samples = want.samples;
+            if (vk::pipeline::LegacyMode())
+            {
+                key.depthControl = want.depthControl;
+                key.modeCntl = want.modeCntl;
+            }
             if (EnsurePipeline(key, vertex->second, pixel->second)) g.prewarmed++;
             // Kept, so the cache written at shutdown is the union of this run and earlier
             // ones. Recording only what this run built would shrink it every time.

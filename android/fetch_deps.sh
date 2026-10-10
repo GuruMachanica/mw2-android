@@ -12,7 +12,7 @@ set -euo pipefail
 REPOSITORY_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 TARGET="${REPOSITORY_ROOT}/third_party/libadrenotools"
 REMOTE="${ADRENOTOOLS_REMOTE:-https://github.com/bylaws/libadrenotools.git}"
-REVISION="${ADRENOTOOLS_REVISION:-master}"
+REVISION="${ADRENOTOOLS_REVISION:-c6f1d2df63e792e3be6cb3bc95ee6bb9a2503d21}"
 
 if [ -d "${TARGET}/.git" ]; then
     echo "libadrenotools is already there; updating it."
