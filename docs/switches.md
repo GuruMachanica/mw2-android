@@ -41,7 +41,7 @@ Read by every build; see [multiplayer.md](multiplayer.md).
 
 | switch | effect |
 |---|---|
-| `MW2_NAME=<name>` | lan: the player's name (default: the login name) |
+| `MW2_NAME=<name>` | lan: the player's name, instead of his profile's; the name of the first profile when it is made |
 | `MW2_LAN_PORT=<port>` | lan: the shared broadcast port (3074) |
 | `MW2_LAN_JOIN=<name>` | lan: joins that player's party or lobby when it is seen |
 | `MW2_LAN_ACCEPT=1` | lan: accepts invitations |

@@ -129,7 +129,10 @@ as `saves/online/user/<xuid>/mpdata`: a CRC-32 of the rest, high byte first,
 then the buffer, 8188 bytes whose values are low byte first and which opens
 with the layout's version (155) and checksum. The offline profile's is the
 content package `saves/mpdata_<xuid>/`, the same with four bytes before and
-one after. A file with another version or checksum is left alone.
+one after. A file with another version or checksum is left alone. A profile
+([gameplay.md](gameplay.md#signing-in)) has both, named by its number; the
+screen shows it once, with the rank of each, and a change is made to both.
+Stats under a number no profile has are listed as nobody's.
 
 Where a value is in the buffer is the title's knowledge, in a signed fastfile,
 as are the challenges' tiers and the ranks. `tools/playerdata_layout.py` reads

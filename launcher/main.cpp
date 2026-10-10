@@ -189,7 +189,7 @@ namespace
     {
         None, PlayCampaign, PlayMultiplayer, Install, ChooseUpdate, Cancel, Quit,
         // The profile screen and what it does.
-        Profile, Back, NextPlayer, Rename, MaxRank, Prestige, UnlockEverything, UnlockMissions, AllStars,
+        Profile, Back, NextPlayer, Rename, PlayAs, MaxRank, Prestige, UnlockEverything, UnlockMissions, AllStars,
         CheckUpdate, InstallUpdate,
         // The next of the sizes the game draws at.
         Resolution,
@@ -383,6 +383,7 @@ namespace
                 message.clear();
                 SDL_StartTextInput(window);
                 break;
+            case Action::PlayAs:
             case Action::MaxRank:
             case Action::Prestige:
             case Action::UnlockEverything:
@@ -438,8 +439,13 @@ namespace
             // The list is the newest first, and a change makes its file the
             // newest: the player is found again by the file.
             const fs::path file = who ? who->file : fs::path();
+            const uint64_t id = who ? who->id : 0;
             switch (action)
             {
+            case Action::PlayAs:
+                done = who && profile::PlayAs(*who, error);
+                message = who ? who->name + " plays at the first controller from the game's next start." : "";
+                break;
             case Action::MaxRank:
                 done = who && profile::MaxRank(*who, error);
                 message = "The rank is now 70.";
@@ -471,7 +477,7 @@ namespace
             messageFocus = focus;
             ReadProfile();
             for (size_t i = 0; i < players.size(); i++)
-                if (players[i].file == file) player = i;
+                if (id ? players[i].id == id : players[i].file == file) player = i;
         }
 
         std::vector<Entry> ReportEntries() const
@@ -552,9 +558,15 @@ namespace
                 const profile::Player& p = players[player];
                 prestige = p.prestige;
                 named = p.id != 0;
-                who = (named ? p.name + ". " : std::string()) + "Rank " + std::to_string(p.level) + ", prestige " + std::to_string(p.prestige) + ".\n" +
-                      (p.offline ? "An offline profile" : "An online profile") +
-                      (p.file.empty() ? ", not played yet." : ", last played " + p.played + ".");
+                auto rank = [](bool offline, int level, int prestige, const std::string& played) {
+                    return std::string(offline ? "Offline" : "Online") + ": rank " + std::to_string(level) + ", prestige " +
+                           std::to_string(prestige) + ", last played " + played + ".";
+                };
+                who = named ? p.name + (p.first ? ", player 1." : ".") : std::string("Stats of no profile.");
+                if (p.file.empty()) who += "\nNot played yet.";
+                else who += "\n" + rank(p.offline, p.level, p.prestige, p.played);
+                for (const profile::Player::Other& other : p.also)
+                    who += "\n" + rank(other.offline, other.level, other.prestige, other.played);
             }
             // The game keeps the profile in memory and writes it when it ends,
             // over anything changed here meanwhile.
@@ -564,9 +576,14 @@ namespace
                     who + "\n\nSeveral players have played here. Choose to go to the next one.");
             add(Action::Rename, "RENAME", named && !gameRunning, "NAME",
                 renaming ? "New name: " + newName + "_\n\nENTER keeps it, ESC leaves the name as it was."
-                         : who + "\n\n" + (named ? "Type a new name for this profile with the keyboard."
-                                                  : "Only the profiles made on the game's sign-in screen, for the players at the second to fourth controllers, are named here.") + close);
-            add(Action::MaxRank, "MAX RANK", any, "MULTIPLAYER RANK", who + "\n\nSets the rank to 70, which unlocks every weapon, perk and equipment." + close);
+                         : who + "\n\n" + (named ? "Type a new name for this profile with the keyboard. On Steam, other players see the Steam name."
+                                                  : "No profile owns these stats any more: they are from a version of the game before profiles, or from a profile since deleted.") + close);
+            const bool isFirst = named && players[player].first;
+            add(Action::PlayAs, isFirst ? "PLAYER 1" : "PLAY AS", named && !isFirst && !gameRunning, "PLAYER 1",
+                who + "\n\n" + (isFirst ? "This profile plays at the first controller: the campaign's and the multiplayer's player. Choose another profile here to play as that one."
+                                        : named ? "Puts this profile at the first controller, from the game's next start."
+                                                : "Only a profile can be put at the first controller.") + close);
+            add(Action::MaxRank, "MAX RANK", any, "MULTIPLAYER RANK", who + "\n\nSets the rank to 70, online and offline, which unlocks every weapon, perk and equipment." + close);
             add(Action::Prestige, "PRESTIGE " + std::to_string(prestige), any, "PRESTIGE",
                 who + "\n\nEach choice is one prestige more; after " + std::to_string(profile::MaxPrestige()) + " it is 0 again. The rank stays." + close);
             add(Action::UnlockEverything, "UNLOCK EVERYTHING", any, "CHALLENGES AND UNLOCKS",

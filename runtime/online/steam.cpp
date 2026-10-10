@@ -24,6 +24,7 @@
 #include "service.h"
 #include "../env.h"
 #include "../log.h"
+#include "../signin.h"
 
 #include <algorithm>
 #include <atomic>
@@ -342,7 +343,10 @@ namespace
         }
 
         uint64_t LocalId() override { return self_; }
-        uint64_t Account() override { return self_; }
+        // The profile at the first controller; until there were profiles it
+        // was the Steam account, and the rank is still under that.
+        uint64_t Account() override { return signin::First().id; }
+        uint64_t FormerAccount() override { return self_; }
         std::string LocalName() override { return name_; }
 
         bool Send(uint64_t peer, uint16_t fromPort, uint16_t toPort,
@@ -556,7 +560,12 @@ namespace
             if (ReadSession(Call<const char*>(matchmaking_, matchmaking::GetLobbyData, lobby_.load(), "xsession"),
                             invite.session))
             {
-                invite.inviter = CallSteamId(matchmaking_, matchmaking::Owner, lobby_.load());
+                // The host's account, which is his profile and not his Steam
+                // id; a host of a version before profiles says none, and his
+                // was the Steam id.
+                const char* account = Call<const char*>(matchmaking_, matchmaking::GetLobbyData, lobby_.load(), "account");
+                invite.inviter = account && *account ? std::strtoull(account, nullptr, 16)
+                                                     : CallSteamId(matchmaking_, matchmaking::Owner, lobby_.load());
                 invite.fromInvite = true;
                 invites_.push_back(invite);
                 followed_ = true;
@@ -585,6 +594,9 @@ namespace
             if (!owner_ || !lobby_) return;
             Call<bool>(matchmaking_, matchmaking::SetLobbyData, lobby_.load(), "connect", advert_.c_str());
             Call<bool>(matchmaking_, matchmaking::SetLobbyData, lobby_.load(), "xsession", session_.c_str());
+            char account[20];
+            std::snprintf(account, sizeof account, "%012llx", (unsigned long long)Account());
+            Call<bool>(matchmaking_, matchmaking::SetLobbyData, lobby_.load(), "account", account);
         }
 
         bool InLobby(uint64_t player)

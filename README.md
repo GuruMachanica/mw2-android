@@ -95,6 +95,12 @@ This is **not an emulator**: Xbox 360 PowerPC machine instructions are translate
 - **Customize Layout**: Open pause menu → **Edit controls** to drag, resize, or adjust transparency of any button.
 - **Physical Gamepad**: Bluetooth or USB Xbox/PlayStation controllers are automatically detected.
 
+### Multiplayer & Profiles
+
+- **Steam**: With Steam running, the game shows as *Spacewar*. Without it, the `steam` download plays as the `lan` one does, with a rank of its own. Host a PLAY ONLINE → PRIVATE MATCH, invite from Steam's friend list (or `F6`).
+- **LAN**: SYSTEM LINK finds games on the network automatically. For private matches, the lobby's "Invite friends" invites everyone on the network.
+- **Profiles**: Every player is a profile, made the first time you play and named after your login. The launcher's PROFILE screen renames it, and puts another profile in your place. Additional controllers can sign in with separate profiles, ranks, and settings.
+
 ### PC Keybindings
 
 | Key | Action |

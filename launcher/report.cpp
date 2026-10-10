@@ -45,6 +45,28 @@ namespace
         ReplaceAll(text, folder.generic_string(), with);
     }
 
+    // An address inside a home or office network says which kind of connection
+    // it is on and nothing about whose: every router hands out the same ones.
+    // Its first half stays, since that is what tells a real connection from
+    // one a virtual machine or a VPN added. Any other address goes entirely.
+    std::string Addresses(const std::string& line, const std::regex& address)
+    {
+        std::string out;
+        size_t from = 0;
+        for (std::sregex_iterator at(line.begin(), line.end(), address), end; at != end; ++at)
+        {
+            unsigned a = 0, b = 0;
+            std::sscanf(at->str().c_str(), "%u.%u", &a, &b);
+            std::string kept = "<address>";
+            if (a == 10 || a == 127) kept = std::to_string(a) + ".x.x.x";
+            else if ((a == 192 && b == 168) || (a == 172 && b >= 16 && b <= 31) || (a == 169 && b == 254))
+                kept = std::to_string(a) + "." + std::to_string(b) + ".x.x";
+            out += line.substr(from, size_t(at->position()) - from) + kept;
+            from = size_t(at->position() + at->length());
+        }
+        return out + line.substr(from);
+    }
+
     // The log without what says who the player is.
     std::string Scrub(std::istream& log)
     {
@@ -76,7 +98,7 @@ namespace
                 if (const size_t at = line.find(" invites you"); at != std::string::npos)
                     line = line.substr(0, line.find("online: ") + 8) + "<removed>" + line.substr(at);
             }
-            line = std::regex_replace(line, address, "<address>");
+            line = Addresses(line, address);
             line = std::regex_replace(line, account, "$1<id>");
             ReplaceFolder(line, here, "<game folder>");
             ReplaceFolder(line, home, "<home>");

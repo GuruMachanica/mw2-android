@@ -1,5 +1,17 @@
 #pragma once
-// Who plays at controllers 2 to 4, and the screen that chooses it.
+// Who plays at each controller, and the screen that chooses it for the second
+// to the fourth.
+//
+// A player is a profile of this machine: a number the title knows him by, under
+// which his rank is kept (docs/saves.md), and a name. They are in
+// saves/profiles.txt -- a line each, twelve hexadecimal digits, a space, the
+// name -- with two lines more: `first`, the profile at the first controller,
+// and `machine`, the machine the numbers were made on. The first controller's
+// profile is made the first time the game runs, named after the login, and is
+// the same every run until the launcher names another. On another machine,
+// where a copied game folder ends up, every profile gets a new number and what
+// was kept under the old one is renamed: two machines never play as one
+// player, which the title answers by dropping the host.
 //
 // The console signs a profile in at each controller through its own sign-in
 // screen, which a title asks for (XamShowSigninUI) and never draws. This is
@@ -7,8 +19,7 @@
 // or nobody. The console's also signs a guest in beside a player on Live,
 // which this title has no use for: its split screen is offline. Nothing is
 // remembered between runs: every controller but the first starts signed
-// out. The first controller's player is the online service's and is not
-// chosen here (kernel/xam.cpp).
+// out, and the first's is not chosen on this screen.
 //
 // The screen is drawn here into a picture the presenter lays over the frame,
 // and is driven by the controller that asked for it, through the title's own
@@ -29,6 +40,8 @@ namespace signin
     };
     // The player at controller 1, 2 or 3 (the second to the fourth).
     Player At(uint32_t user);
+    // The player at the first controller. Always signed in.
+    Player First();
     // A bit per signed-in controller, the first's always set.
     uint32_t Mask();
 

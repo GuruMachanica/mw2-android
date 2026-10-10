@@ -52,58 +52,68 @@ namespace
     constexpr uint32_t kSignedInLocally = 1, kSignedInToLive = 2;
     constexpr uint32_t kFunctionFailed = 1627;   // ERROR_FUNCTION_FAILED
 
-    // The player the online service logged in, or the one offline player. An
-    // offline XUID (top byte 0xE0) with the service's account in the low 48
-    // bits, so every machine in a match has its own.
-    uint64_t LocalXuid()
+    // The player at the first controller: the profile there (signin.h), which
+    // the online service knows by the same number -- plus one for a second copy
+    // on this machine. An offline XUID (top byte 0xE0) over its 48 bits.
+    uint64_t LocalAccount()
     {
         auto* service = online::Get();
-        return 0xE000000000000000ull | (service ? service->Account() & 0xFFFFFFFFFFFFull : 1);
+        return (service ? service->Account() : signin::First().id) & 0xFFFFFFFFFFFFull;
     }
+    uint64_t LocalXuid() { return 0xE000000000000000ull | LocalAccount(); }
 
     // The XUID Live knows an account by, the console's 0x0009 prefix over the
     // same 48 bits.
     uint64_t OnlineXuid(uint64_t account) { return 0x0009000000000000ull | (account & 0xFFFFFFFFFFFFull); }
-    uint64_t LocalOnlineXuid() { return OnlineXuid(online::Get()->Account()); }
+    uint64_t LocalOnlineXuid() { return OnlineXuid(LocalAccount()); }
 
+    std::string XuidText(uint64_t xuid)
+    {
+        char text[20];
+        std::snprintf(text, sizeof text, "%016llx", (unsigned long long)xuid);
+        return text;
+    }
+
+    // The name the service has for the player -- Steam's -- or the profile's.
     std::string LocalName()
     {
         auto* service = online::Get();
-        std::string name = service ? service->LocalName() : "Player";
+        std::string name = service ? service->LocalName() : std::string();
+        if (name.empty()) name = signin::First().name;
         if (name.size() > 15) name.resize(15);   // a gamertag's longest
         return name;
     }
 
-    // The first time the online service's player is seen on this machine, he
-    // takes over the rank earned here with no service, when the one player
-    // was account 1: the offline stats package under his own offline XUID,
-    // and, signed in to Live, the stats Live keeps for him, which are the same
-    // file without its four leading bytes and its last (docs/saves.md). What
-    // he already has is left alone, and so is what is copied from.
+    // The first time a profile plays at the first controller, it takes over
+    // what the player has earned here so far. From the versions that knew him
+    // by the online service's own number (FormerAccount: Steam's account, the
+    // lan's hash of his name), the rank kept under that number is renamed to
+    // the profile's. Failing that, the rank earned with no service, when the
+    // one player was account 1, is copied: the offline stats package under his
+    // own offline XUID, and, signed in to Live, the stats Live keeps for him,
+    // which are the same file without its four leading bytes and its last
+    // (docs/saves.md). What he already has is left alone.
     void InheritOfflineStats()
     {
         auto* service = online::Get();
-        if (!service) return;
-        auto hex = [](uint64_t xuid) {
-            char text[20];
-            std::snprintf(text, sizeof text, "%016llx", (unsigned long long)xuid);
-            return std::string(text);
-        };
+        const auto hex = XuidText;
         const fs::path& saves = SaveRoot();
+        std::error_code ec;
+        if (service)
+            if (const uint64_t former = service->FormerAccount()) kernel::MovePlayerData(former, LocalAccount());
         const std::string none = "mpdata_e000000000000001";
         std::ifstream in(saves / none / none, std::ios::binary);
         const std::vector<char> stats{ std::istreambuf_iterator<char>(in), std::istreambuf_iterator<char>() };
         constexpr size_t kLead = 4, kStored = 8192;
         if (stats.size() != kLead + kStored + 1) return;
 
-        std::error_code ec;
         const std::string own = "mpdata_" + hex(LocalXuid());
         if (own != none && !fs::exists(saves / own, ec) && fs::create_directories(saves / own, ec))
         {
             std::ofstream(saves / own / own, std::ios::binary).write(stats.data(), std::streamsize(stats.size()));
             LOGI("xam: %s starts from the rank earned here offline", own.c_str());
         }
-        if (!online::Live()) return;
+        if (!service || !online::Live()) return;
         const fs::path live = saves / "online" / "user" / hex(LocalOnlineXuid());
         if (!fs::exists(live / "mpdata", ec) && (fs::create_directories(live, ec), fs::is_directory(live, ec)))
         {
@@ -846,6 +856,31 @@ namespace
         }
         return XLiveBase(message, param1, param2);
     }
+}
+
+void kernel::MovePlayerData(uint64_t from, uint64_t to)
+{
+    from &= 0xFFFFFFFFFFFFull;
+    to &= 0xFFFFFFFFFFFFull;
+    if (!from || from == to) return;
+    const fs::path& saves = SaveRoot();
+    std::error_code ec;
+    const std::string was = "mpdata_" + XuidText(0xE000000000000000ull | from), is = "mpdata_" + XuidText(0xE000000000000000ull | to);
+    if (fs::exists(saves / was / was, ec) && !fs::exists(saves / is, ec))
+    {
+        fs::rename(saves / was, saves / is, ec);
+        if (!ec) fs::rename(saves / is / was, saves / is / is, ec);
+        LOGI("xam: the rank kept as %s is now %s%s", was.c_str(), is.c_str(), ec ? " -- not moved" : "");
+    }
+    const fs::path users = saves / "online" / "user";
+    const fs::path liveWas = users / XuidText(OnlineXuid(from)), liveIs = users / XuidText(OnlineXuid(to));
+    if (fs::is_directory(liveWas, ec) && !fs::exists(liveIs, ec)) fs::rename(liveWas, liveIs, ec);
+    // A profile's settings at the second to fourth controllers (kernel/profile.cpp).
+    char settingsWas[40], settingsIs[40];
+    std::snprintf(settingsWas, sizeof settingsWas, "profile_%012llx.bin", (unsigned long long)from);
+    std::snprintf(settingsIs, sizeof settingsIs, "profile_%012llx.bin", (unsigned long long)to);
+    if (fs::exists(saves / settingsWas, ec) && !fs::exists(saves / settingsIs, ec))
+        fs::rename(saves / settingsWas, saves / settingsIs, ec);
 }
 
 void kernel::AcceptInvite(uint64_t inviterAccount, const uint8_t* session60, bool fromInvite)

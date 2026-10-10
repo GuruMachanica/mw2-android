@@ -99,10 +99,16 @@ namespace
 
     bool Change(const profile::Player& player, std::string& error, void (*change)(Stats&, int), int value = 0)
     {
-        Stats stats;
-        if (!stats.Load(player.file)) { error = "Cannot read " + install::Utf8(player.file) + "."; return false; }
-        change(stats, value);
-        return stats.Save(player.file, error);
+        std::vector<fs::path> files{ player.file };
+        for (const profile::Player::Other& other : player.also) files.push_back(other.file);
+        for (const fs::path& file : files)
+        {
+            Stats stats;
+            if (!stats.Load(file)) { error = "Cannot read " + install::Utf8(file) + "."; return false; }
+            change(stats, value);
+            if (!stats.Save(file, error)) return false;
+        }
+        return true;
     }
 
     std::string Day(const fs::path& path)
@@ -270,29 +276,48 @@ namespace
 
 namespace
 {
-    // saves/profiles.txt, the game's (runtime/signin.cpp): a line per profile,
-    // twelve hexadecimal digits, a space, the name.
+    // saves/profiles.txt, the game's (runtime/signin.h): a line per profile,
+    // twelve hexadecimal digits, a space, the name; `first`, the profile at
+    // the first controller; and lines of the game's own, kept as they are.
     struct Named { uint64_t id; std::string name; };
-    std::vector<Named> ReadNamed()
+    struct Book
     {
         std::vector<Named> named;
+        uint64_t first = 0;
+        std::vector<std::string> others;
+    };
+    Book ReadBook()
+    {
+        Book book;
         std::ifstream in(kSaves / "profiles.txt");
         for (std::string line; std::getline(in, line); )
         {
             while (!line.empty() && (line.back() == '\r' || line.back() == ' ')) line.pop_back();
-            if (line.size() < 14 || line[12] != ' ') continue;
             char* end = nullptr;
-            const uint64_t id = std::strtoull(line.substr(0, 12).c_str(), &end, 16);
-            if (id && !*end) named.push_back({ id, line.substr(13, 15) });
+            if (line.rfind("first ", 0) == 0) { book.first = std::strtoull(line.c_str() + 6, &end, 16); continue; }
+            const uint64_t id = line.size() >= 14 && line[12] == ' ' ? std::strtoull(line.substr(0, 12).c_str(), &end, 16) : 0;
+            if (id && !*end) book.named.push_back({ id, line.substr(13, 15) });
+            else if (!line.empty()) book.others.push_back(line);
         }
-        return named;
+        return book;
     }
+    std::vector<Named> ReadNamed() { return ReadBook().named; }
 
     std::string IdText(uint64_t id)
     {
         char text[16];
         std::snprintf(text, sizeof text, "%012llx", (unsigned long long)id);
         return text;
+    }
+
+    bool WriteBook(const Book& book, std::string& error)
+    {
+        std::ofstream out(kSaves / "profiles.txt", std::ios::trunc);
+        for (const std::string& line : book.others) out << line << '\n';
+        if (book.first) out << "first " << IdText(book.first) << '\n';
+        for (const Named& entry : book.named) out << IdText(entry.id) << ' ' << entry.name << '\n';
+        if (!out) { error = "saves/profiles.txt could not be written."; return false; }
+        return true;
     }
 }
 
@@ -304,18 +329,27 @@ bool profile::Rename(const Player& player, const std::string& name, std::string&
         error = "A name is one to fifteen letters, digits and spaces.";
         return false;
     }
-    std::vector<Named> named = ReadNamed();
+    Book book = ReadBook();
     bool found = false;
-    for (Named& entry : named)
+    for (Named& entry : book.named)
     {
         if (entry.id == player.id) { entry.name = name; found = true; }
         else if (entry.name == name) { error = "Another profile has that name."; return false; }
     }
-    if (!found) { error = "That profile is not one of the sign-in screen's."; return false; }
-    std::ofstream out(kSaves / "profiles.txt", std::ios::trunc);
-    for (const Named& entry : named) out << IdText(entry.id) << ' ' << entry.name << '\n';
-    if (!out) { error = "saves/profiles.txt could not be written."; return false; }
-    return true;
+    if (!found) { error = "No profile owns these stats any more."; return false; }
+    return WriteBook(book, error);
+}
+
+bool profile::PlayAs(const Player& player, std::string& error)
+{
+    Book book = ReadBook();
+    if (std::none_of(book.named.begin(), book.named.end(), [&](const Named& entry) { return entry.id == player.id; }))
+    {
+        error = "No profile owns these stats any more.";
+        return false;
+    }
+    book.first = player.id;
+    return WriteBook(book, error);
 }
 
 std::vector<profile::Player> profile::Players()
@@ -346,22 +380,41 @@ std::vector<profile::Player> profile::Players()
     std::sort(found.begin(), found.end(), [](const Found& a, const Found& b) { return a.written > b.written; });
     std::vector<Player> players;
     for (Found& entry : found) players.push_back(std::move(entry.player));
-    // The sign-in screen's profiles: the stats file of one is named by its
-    // id, and one that has not finished a match has none.
-    for (const Named& entry : ReadNamed())
+    // The profiles: the stats files of one are named by its number -- the
+    // offline package and what the online service keeps -- and one that has
+    // not finished a match has none.
+    const Book book = ReadBook();
+    for (const Named& entry : book.named)
     {
-        const std::string package = "mpdata_e000" + IdText(entry.id);
-        auto it = std::find_if(players.begin(), players.end(), [&](const Player& player) {
-            return player.file.filename().string() == package; });
-        if (it == players.end())
+        const std::string id = IdText(entry.id);
+        bool found = false;
+        for (Player& player : players)
         {
-            players.emplace_back();
-            it = players.end() - 1;
-            it->offline = true;
+            if (player.file.filename().string() != "mpdata_e000" + id &&
+                player.file.parent_path().filename().string() != "0009" + id) continue;
+            player.name = entry.name;
+            player.id = entry.id;
+            player.first = entry.id == book.first;
+            found = true;
         }
-        it->name = entry.name;
-        it->id = entry.id;
+        if (found) continue;
+        players.emplace_back();
+        players.back().offline = true;
+        players.back().name = entry.name;
+        players.back().id = entry.id;
+        players.back().first = entry.id == book.first;
     }
+    // One entry a profile: the list is the newest file first, so the first
+    // of a profile's is the one played last.
+    std::vector<Player> merged;
+    for (Player& player : players)
+    {
+        auto same = player.id ? std::find_if(merged.begin(), merged.end(), [&](const Player& other) { return other.id == player.id; })
+                              : merged.end();
+        if (same == merged.end()) merged.push_back(std::move(player));
+        else same->also.push_back({ player.file, player.offline, player.level, player.prestige, player.played });
+    }
+    players = std::move(merged);
     return players;
 }
 

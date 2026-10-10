@@ -85,9 +85,32 @@ fire (`MW2_INPUT_SCRIPT`).
 
 ## Signing in
 
-The first controller's player is the one the online service logged in, signed
-in from the start. Nobody is at the others until the sign-in screen puts
-someone there (`runtime/signin.cpp`), and nothing of it is kept between runs.
+Every player is a profile of this machine: a line of `saves/profiles.txt`,
+twelve hexadecimal digits -- the number the title knows him by -- and a name
+(`runtime/signin.cpp`).
+
+The first controller's profile is signed in from the start. It is made the
+first time the game runs, named after the login (or `MW2_NAME`), and is the
+same every run: the file's `first` line names it, and the launcher's PROFILE
+screen puts another there. The online service is not who the player is. Steam
+gives him the name other players see and brings his friends; the lan gives
+him nothing but the network. His rank is the profile's, in files on this
+machine ([saves.md](saves.md)), whichever service he plays through.
+
+The file's `machine` line is a hash of the machine's own id (`MachineGuid`,
+`/etc/machine-id`). Read on another machine, where a copied game folder ends
+up, every profile gets a new number and what was kept under the old one is
+renamed (`kernel::MovePlayerData`): two machines playing as one player is two
+of the same player in a match, and the title drops the host when a player it
+already has connects again.
+
+Versions before profiles knew the first player by the service's own number,
+Steam's account or a hash of the lan's name. The rank kept under that number
+is renamed to the profile's the first time it plays (`Service::FormerAccount`,
+`InheritOfflineStats` in `kernel/xam.cpp`).
+
+Nobody is at the other controllers until the sign-in screen puts someone
+there, and that is not kept between runs.
 It is the console's screen, which a title asks for with `XamShowSigninUI` and
 never draws: the multiplayer asks from SIGN IN PROFILE and CHANGE PROFILE in
 split screen, and when a controller nobody is signed in at chooses SYSTEM
@@ -99,11 +122,11 @@ does not: the title's split screen is offline only, and its system link takes
 one player a copy.
 
 It lists the profiles of this machine that are not already playing, and "New
-profile", which makes "Player 2" or the next free number. A profile is a line
-of `saves/profiles.txt`, twelve hexadecimal digits and a name, and is signed in
+profile", which makes "Player 2" or the next free number. A profile is signed in
 locally (state 1) under the offline XUID `0xE000` over those digits; the title
 names its stats by that XUID and its settings are `profile_<digits>.bin`
-([saves.md](saves.md)). The launcher's PROFILE screen renames one.
+([saves.md](saves.md)). The launcher's PROFILE screen renames one, and puts one
+at the first controller.
 
 The screen opens for the controller pressed last, since the call does not say
 which. While it is open the title reads every controller as idle and hears

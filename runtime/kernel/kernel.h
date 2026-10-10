@@ -95,6 +95,10 @@ namespace kernel
     void MountDevice(const std::string& name, const std::filesystem::path& root);
     void UnmountDevice(const std::string& name);
     const std::filesystem::path& SaveRoot();
+    // What is kept under a player's number -- his rank, offline and Live, and
+    // the settings of a profile at the second to fourth controllers -- renamed
+    // to another number, where that one has none yet (kernel/xam.cpp).
+    void MovePlayerData(uint64_t from, uint64_t to);
 
     // The one storage device this runtime offers. The title takes the id from the
     // device selector, hands it back in every content call and stores it in the
