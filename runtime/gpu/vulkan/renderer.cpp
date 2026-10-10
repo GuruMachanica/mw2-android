@@ -108,6 +108,10 @@ static void RollbackInitialise()
         }
         slot = State::Slot{};
     }
+    vk::textures::Shutdown();
+    g.presentWidth = 1280;
+    g.presentHeight = 720;
+    g.scale = 1;
     g.depthFormat = VK_FORMAT_UNDEFINED;
     g.command = VK_NULL_HANDLE;
     g.ready = false;

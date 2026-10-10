@@ -273,8 +273,12 @@ uint32_t kernel::Wait(Dispatcher* const* objects, uint32_t count, bool all,
         {
             if (block.wake.wait_for(held, std::chrono::seconds(2)) == std::cv_status::timeout)
             {
-                LOGW("sync: thread waiting on %u object(s) (first: %s, handle %08X) for >2s",
-                     count, objects[0]->TypeName(), objects[0]->handle);
+                if (objects[0]->handle)
+                    LOGW("sync: thread waiting on %u object(s) (first: %s, handle %08X) for >2s",
+                         count, objects[0]->TypeName(), objects[0]->handle);
+                else
+                    LOGW("sync: thread waiting on %u object(s) (first: %s at guest %08X) for >2s",
+                         count, objects[0]->TypeName(), objects[0]->guestHeader);
             }
         }
     }

@@ -238,22 +238,29 @@ namespace
 
             if (fs::is_regular_file(to, ec) && fs::file_size(to, ec) == file->size)
             {
-                if (file->size > 0)
+                if (file->size == 0) continue;
+                bool match = true;
+                const uint64_t sampleOffsets[3] = {
+                    0,
+                    file->size / 2,
+                    file->size > 4096 ? file->size - 4096 : 0
+                };
+                char bufDisk[4096], bufSrc[4096];
+                std::ifstream in(to, std::ios::binary);
+                for (uint64_t sampleAt : sampleOffsets)
                 {
-                    char headDisk[64] = {}, headSrc[64] = {};
-                    const size_t checkLen = std::min<size_t>(64, size_t(file->size));
-                    std::ifstream in(to, std::ios::binary);
-                    if (in.read(headDisk, checkLen) && size_t(in.gcount()) == checkLen &&
-                        source->Read(*file, 0, headSrc, checkLen) &&
-                        std::memcmp(headDisk, headSrc, checkLen) == 0)
+                    const size_t checkLen = size_t(std::min<uint64_t>(sizeof(bufDisk), file->size - sampleAt));
+                    in.seekg(std::streamoff(sampleAt));
+                    if (!in.read(bufDisk, checkLen) || size_t(in.gcount()) != checkLen ||
+                        !source->Read(*file, sampleAt, bufSrc, checkLen) ||
+                        std::memcmp(bufDisk, bufSrc, checkLen) != 0)
                     {
-                        continue;
+                        match = false;
+                        break;
                     }
+                    if (file->size <= sizeof(bufDisk)) break;
                 }
-                else
-                {
-                    continue;
-                }
+                if (match) continue;
             }
             copy.push_back(file);
             needed += file->size;

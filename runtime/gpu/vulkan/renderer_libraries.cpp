@@ -149,8 +149,11 @@ namespace
         info.flags = optimise ? VK_PIPELINE_CREATE_LINK_TIME_OPTIMIZATION_BIT_EXT : 0;
         info.layout = Layout();
         VkPipeline made = VK_NULL_HANDLE;
-        if (vkCreateGraphicsPipelines(g.device, Cache(), 1, &info, nullptr, &made) != VK_SUCCESS)
-            return VK_NULL_HANDLE;
+        {
+            std::lock_guard cacheLock(vk::pipeline::CacheMutex());
+            if (vkCreateGraphicsPipelines(g.device, Cache(), 1, &info, nullptr, &made) != VK_SUCCESS)
+                return VK_NULL_HANDLE;
+        }
         return made;
     }
 

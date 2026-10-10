@@ -501,6 +501,11 @@ namespace
         static std::string pathStr;
         if (!pathStr.empty()) return pathStr.c_str();
         if (env::Flag("MW2_NO_PIPELINE_CACHE")) return nullptr;
+        if (const char* path = env::Text("MW2_PIPELINE_CACHE"))
+        {
+            pathStr = path;
+            return pathStr.c_str();
+        }
 #ifdef MW2_ANDROID
         if (!android::GetPaths().cache.empty())
         {
@@ -508,20 +513,23 @@ namespace
             return pathStr.c_str();
         }
 #endif
-        if (const char* path = env::Text("MW2_PIPELINE_CACHE"))
-        {
-            pathStr = path;
-            return pathStr.c_str();
-        }
         return nullptr;
     }
 
     void CreateCache()
     {
         std::lock_guard lock(vk::pipeline::CacheMutex());
+        if (g.name.find("Mali") != std::string::npos && !env::Flag("MW2_FORCE_PIPELINE_CACHE"))
+        {
+            LOGI("pipeline: Mali driver detected (%s); persistent VkPipelineCache bypassed to prevent known driver deadlocks",
+                 g.name.c_str());
+            return;
+        }
+
         std::vector<uint8_t> initial;
         if (const char* path = CachePath())
         {
+            LOGI("pipeline: using pipeline cache file: %s", path);
             if (std::FILE* f = std::fopen(path, "rb"))
             {
                 std::fseek(f, 0, SEEK_END);
@@ -565,10 +573,17 @@ namespace
         std::string tmpPath = std::string(path) + ".tmp";
         if (std::FILE* f = std::fopen(tmpPath.c_str(), "wb"))
         {
-            std::fwrite(data.data(), 1, size, f);
-            std::fclose(f);
-            std::rename(tmpPath.c_str(), path);
-            LOGI("pipeline: wrote %zu KB of pipeline cache to %s", size / 1024, path);
+            const size_t written = std::fwrite(data.data(), 1, size, f);
+            const int closed = std::fclose(f);
+            if (written == size && closed == 0 && std::rename(tmpPath.c_str(), path) == 0)
+            {
+                LOGI("pipeline: wrote %zu KB of pipeline cache to %s", size / 1024, path);
+            }
+            else
+            {
+                std::remove(tmpPath.c_str());
+                LOGW("pipeline: failed to write pipeline cache to %s", path);
+            }
         }
     }
 
@@ -678,7 +693,10 @@ void*    vk::pipeline::Layout() { return g.layout; }
 void*    vk::pipeline::Cache()
 {
     static const bool noCache = env::Flag("MW2_NO_PIPELINE_CACHE");
-    return noCache ? nullptr : g.cache;
+    static const bool isMali = (g.name.find("Mali") != std::string::npos);
+    static const bool forceCache = env::Flag("MW2_FORCE_PIPELINE_CACHE");
+    if (noCache || (isMali && !forceCache)) return nullptr;
+    return g.cache;
 }
 void     vk::pipeline::SaveCache() { ::SaveCache(); }
 

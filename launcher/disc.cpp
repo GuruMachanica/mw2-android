@@ -24,6 +24,12 @@ namespace
         {
             file_.open(path, std::ios::binary);
             if (!file_) { error = "cannot open " + Utf8(path); return false; }
+            file_.seekg(0, std::ios::end);
+            const auto endPos = file_.tellg();
+            if (endPos <= 0) { error = "empty disc image"; return false; }
+            imageSize_ = uint64_t(endPos);
+            file_.seekg(0, std::ios::beg);
+
             for (uint64_t base : { 0x0ull, 0xFD90000ull, 0x2080000ull, 0x18300000ull, 0x18310000ull })
             {
                 char magic[20];
@@ -34,9 +40,6 @@ namespace
                 }
                 if (base == 0x18310000ull) { error = "not an Xbox 360 disc image"; return false; }
             }
-            file_.seekg(0, std::ios::end);
-            imageSize_ = uint64_t(file_.tellg());
-            file_.seekg(0, std::ios::beg);
 
             uint8_t volume[kSector];
             if (!ReadAt(base_ + 32 * kSector, volume, kSector)) { error = "the disc image is cut short"; return false; }

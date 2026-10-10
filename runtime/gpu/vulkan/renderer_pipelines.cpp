@@ -305,9 +305,11 @@ namespace vk::renderer::detail
 
         gpu::detail::SetCurrentDrawStage("Draw_EnsurePipeline_vkCreateGraphicsPipelines");
         const auto compileStart = std::chrono::steady_clock::now();
-        LOGI("renderer: building pipeline %016llX/%016llX (c=%d, d=%d, topo=%u, samples=%u, pass=%p)...",
+        LOGI("renderer: building pipeline %016llX/%016llX (c=%d, d=%d, topo=%u, s=%u, blend=%08X, mask=%X, depth=%08X, mode=%08X, pass=%p, cache=%p)...",
              (unsigned long long)key.vertexShader, (unsigned long long)key.pixelShader,
-             key.colourFormat, key.depthFormat, key.topology, key.samples, (void*)renderPass);
+             key.colourFormat, key.depthFormat, key.topology, key.samples,
+             key.blendControl, key.colourMask, key.depthControl, key.modeCntl,
+             (void*)renderPass, vk::pipeline::Cache());
 
         VkPipeline built = VK_NULL_HANDLE;
         VkResult res = VK_SUCCESS;
@@ -337,6 +339,10 @@ namespace vk::renderer::detail
         auto found = g.pipelines.find(key);
         if (found != g.pipelines.end()) return found->second;
         if (made) *made = true;
+        LOGI("renderer: pipeline miss for %016llX/%016llX (c=%d, d=%d, topo=%u, blend=%08X, mask=%X, depth=%08X, mode=%08X)",
+             (unsigned long long)key.vertexShader, (unsigned long long)key.pixelShader,
+             key.colourFormat, key.depthFormat, key.topology,
+             key.blendControl, key.colourMask, key.depthControl, key.modeCntl);
 
         const auto compileStart = std::chrono::steady_clock::now();
         stutters::Timed timed(stutters::kPipelines);
