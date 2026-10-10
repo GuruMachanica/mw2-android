@@ -34,6 +34,7 @@ import java.util.Locale
 import android.widget.Button
 import android.widget.EditText
 import android.widget.FrameLayout
+import android.widget.HorizontalScrollView
 import android.widget.LinearLayout
 import android.widget.SeekBar
 import android.widget.TextView
@@ -328,13 +329,25 @@ class GameActivity : AppCompatActivity(), NativeListener {
         buildUi()
         goFullscreen()
         window.addFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON)
-        // The phone throttles itself sooner but settles at a rate it can
-        // hold, which is what a game wants: a steady 30 beats 60 that falls
-        // to 20 whenever the chassis warms up.
+        // Sustained performance mode locks CPU/GPU governors to steady frequencies
+        // to prevent erratic thermal throttling mid-gameplay.
         window.setSustainedPerformanceMode(true)
         if (prefs.prefer60Hz) {
             val attributes = window.attributes
             attributes.preferredRefreshRate = 60f
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M) {
+                val displayObj = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) display
+                else {
+                    @Suppress("DEPRECATION")
+                    windowManager.defaultDisplay
+                }
+                if (displayObj != null) {
+                    val mode60 = displayObj.supportedModes.firstOrNull { kotlin.math.abs(it.refreshRate - 60f) < 1f }
+                    if (mode60 != null) {
+                        attributes.preferredDisplayModeId = mode60.modeId
+                    }
+                }
+            }
             window.attributes = attributes
         }
 
@@ -379,6 +392,11 @@ class GameActivity : AppCompatActivity(), NativeListener {
         pads.refreshDevices()
         startHardwareMonitor()
         handler.post(statsTick)
+        handler.postDelayed({
+            if (started) {
+                NativeBridge.nativeRunConsoleCommand("cg_fov ${prefs.fov}")
+            }
+        }, 2500)
     }
 
     // ---- the screen ---------------------------------------------------------
@@ -559,15 +577,61 @@ class GameActivity : AppCompatActivity(), NativeListener {
     }
 
     private fun showConsoleDialog() {
+        val container = LinearLayout(this).apply {
+            orientation = LinearLayout.VERTICAL
+            setPadding(pad(16), pad(12), pad(16), pad(8))
+        }
+
         val input = EditText(this).apply {
-            hint = "e.g. god, give all, cg_drawFPS 1, map..."
+            hint = "e.g. god, give all, cg_fov 85, cg_drawFPS 1..."
             setTextColor(Color.WHITE)
             setHintTextColor(Color.GRAY)
-            setPadding(pad(16), pad(12), pad(16), pad(12))
+            setPadding(pad(12), pad(10), pad(12), pad(10))
         }
+        container.addView(input)
+
+        val scroll = HorizontalScrollView(this).apply {
+            isFillViewport = true
+            setPadding(0, pad(8), 0, 0)
+        }
+        val chipRow = LinearLayout(this).apply {
+            orientation = LinearLayout.HORIZONTAL
+        }
+
+        val presets = listOf(
+            "cg_fov 85" to "Ultrawide (85°)",
+            "cg_fov 65" to "Default (65°)",
+            "cg_drawFPS 1" to "Show FPS",
+            "god" to "God Mode",
+            "give all" to "All Weapons",
+            "ufo" to "UFO / Fly",
+            "r_fullbright 1" to "Full Bright",
+            "cg_drawGun 0" to "Hide Gun",
+        )
+
+        for ((cmd, label) in presets) {
+            val chip = Button(this).apply {
+                text = label
+                textSize = 9.5f
+                alpha = 0.85f
+                setPadding(pad(8), pad(2), pad(8), pad(2))
+                minHeight = pad(28)
+                minWidth = pad(48)
+                setOnClickListener {
+                    input.setText(cmd)
+                    input.setSelection(cmd.length)
+                }
+            }
+            chipRow.addView(chip, LinearLayout.LayoutParams(ViewGroup.LayoutParams.WRAP_CONTENT, ViewGroup.LayoutParams.WRAP_CONTENT).apply {
+                marginEnd = pad(6)
+            })
+        }
+        scroll.addView(chipRow)
+        container.addView(scroll)
+
         AlertDialog.Builder(this)
             .setTitle("IW4 Console Command")
-            .setView(input)
+            .setView(container)
             .setPositiveButton("Run") { _, _ ->
                 val cmd = input.text.toString().trim()
                 if (cmd.isNotEmpty()) {

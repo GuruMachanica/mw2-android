@@ -72,7 +72,9 @@
     <string name="render_scale">Internal render multiplier: %1$dx</string>
     <string name="render_scale_hint">Vulkan internal render scale (MW2_SCALE). Multiplies the title\'s base framebuffer dimensions: 1x native, 2x (supersampled), 3x (high-end). Higher multipliers require significant GPU horsepower.</string>
     <string name="msaa">Smooth edges (multisampling)</string>
-    <string name="prefer_60">Ask the screen for 60 Hz</string>
+    <string name="prefer_60">Lock display to 60 FPS (Hardware Lock)</string>
+    <string name="fov">Field of View (FOV): %1$d°</string>
+    <string name="fov_hint">85° is recommended for ultrawide 20:9 mobile displays. (65° was original 16:9 console FOV).</string>
     <string name="show_stats">Show frames per second</string>
     <string name="hide_stats">Hide frames per second</string>
     <string name="texture_budget_auto">Texture memory: chosen for this phone</string>

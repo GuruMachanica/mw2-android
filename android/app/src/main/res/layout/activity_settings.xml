@@ -65,6 +65,23 @@
             android:layout_height="wrap_content"
             android:text="@string/prefer_60" />
 
+        <TextView
+            android:id="@+id/fov_label"
+            style="@style/SettingLabel"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content" />
+
+        <SeekBar
+            android:id="@+id/fov_slider"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content" />
+
+        <TextView
+            style="@style/SettingHint"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:text="@string/fov_hint" />
+
         <androidx.appcompat.widget.SwitchCompat
             android:id="@+id/stats"
             style="@style/SettingSwitch"

@@ -54,13 +54,22 @@ class Prefs(context: Context) {
         set(value) = store.edit().putBoolean(KEY_SHOW_STATS, value).apply()
 
     /**
-     * Ask the display for 60 Hz rather than its highest rate. The console's
-     * frame is a 60 Hz frame; at 120 the phone shows every one of ours twice
-     * and burns twice the power doing it.
+     * Lock the display and presentation pipeline to 60 FPS.
+     * The console's frame is a 60 Hz frame; locking to 60 avoids erratic
+     * frame pacing, thermal throttling, and excessive battery drain.
      */
     var prefer60Hz: Boolean
         get() = store.getBoolean(KEY_60HZ, true)
         set(value) = store.edit().putBoolean(KEY_60HZ, value).apply()
+
+    /**
+     * Field of View (cg_fov). Modern phones are 20:9 ultrawide,
+     * so 85 FOV gives a natural, wide cinematic view without gun distortion,
+     * compared to the 65 FOV console original.
+     */
+    var fov: Int
+        get() = store.getInt(KEY_FOV, 85).coerceIn(60, 110)
+        set(value) = store.edit().putInt(KEY_FOV, value.coerceIn(60, 110)).apply()
 
     // ---- sound ------------------------------------------------------------
 
@@ -150,6 +159,7 @@ class Prefs(context: Context) {
         private const val KEY_TEXTURE_MB = "textureBudgetMB"
         private const val KEY_SHOW_STATS = "showStats"
         private const val KEY_60HZ = "prefer60Hz"
+        private const val KEY_FOV = "fov"
         private const val KEY_AUDIO = "audio"
         private const val KEY_TOUCH = "touchControls"
         private const val KEY_GAMEPAD = "gamepad"

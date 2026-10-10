@@ -51,6 +51,19 @@ class SettingsActivity : AppCompatActivity() {
 
         switch(R.id.msaa, prefs.multisampling) { prefs.multisampling = it }
         switch(R.id.prefer60, prefs.prefer60Hz) { prefs.prefer60Hz = it }
+
+        val fovLabel: TextView = findViewById(R.id.fov_label)
+        val fovSlider: SeekBar = findViewById(R.id.fov_slider)
+        fovSlider.max = 45 // 65 to 110
+        fovSlider.progress = (prefs.fov - 65).coerceIn(0, 45)
+        fovLabel.text = getString(R.string.fov, fovSlider.progress + 65)
+        fovSlider.setOnSeekBarChangeListener(object : Simple() {
+            override fun onProgressChanged(bar: SeekBar, value: Int, fromUser: Boolean) {
+                fovLabel.text = getString(R.string.fov, value + 65)
+                if (fromUser) prefs.fov = value + 65
+            }
+        })
+
         switch(R.id.stats, prefs.showStats) { prefs.showStats = it }
 
         val textureLabel: TextView = findViewById(R.id.texture_label)

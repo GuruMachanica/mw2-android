@@ -9,6 +9,7 @@ import android.graphics.Paint
 import android.graphics.Path
 import android.graphics.RectF
 import android.util.AttributeSet
+import android.view.HapticFeedbackConstants
 import android.view.MotionEvent
 import android.view.View
 import kotlin.math.hypot
@@ -30,6 +31,8 @@ class TouchOverlayView @JvmOverloads constructor(
     context: Context,
     attrs: AttributeSet? = null,
 ) : View(context, attrs) {
+
+    private val prefs by lazy { Prefs(context) }
 
     var layout: ControlLayout = ControlLayout.defaults()
         set(value) {
@@ -93,6 +96,19 @@ class TouchOverlayView @JvmOverloads constructor(
         textAlign = Paint.Align.CENTER
         isFakeBoldText = true
     }
+    private val subText = Paint(Paint.ANTI_ALIAS_FLAG).apply {
+        textAlign = Paint.Align.CENTER
+        isFakeBoldText = true
+    }
+    private val highlightPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
+        style = Paint.Style.STROKE
+    }
+    private val notchPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
+        style = Paint.Style.STROKE
+    }
+    private val dimplePaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
+        style = Paint.Style.FILL
+    }
     private val dashed = Paint(Paint.ANTI_ALIAS_FLAG).apply {
         style = Paint.Style.STROKE
         strokeWidth = 2f * density
@@ -100,6 +116,7 @@ class TouchOverlayView @JvmOverloads constructor(
     }
     private val path = Path()
     private val box = RectF()
+    private val tempRect = RectF()
 
     init {
         isFocusable = false
@@ -259,6 +276,16 @@ class TouchOverlayView @JvmOverloads constructor(
         return true
     }
 
+    private fun triggerHaptic() {
+        if (!prefs.vibration) return
+        try {
+            performHapticFeedback(
+                HapticFeedbackConstants.VIRTUAL_KEY,
+                HapticFeedbackConstants.FLAG_IGNORE_GLOBAL_SETTING,
+            )
+        } catch (_: Throwable) {}
+    }
+
     private fun press(pointerId: Int, x: Float, y: Float): Boolean {
         val element = elementAt(x, y) ?: return false
         if (element.kind == ControlKind.LOOK) {
@@ -267,6 +294,7 @@ class TouchOverlayView @JvmOverloads constructor(
             lookLastY = y
             return false
         }
+        triggerHaptic()
         claims[pointerId] = element
         when (element.kind) {
             ControlKind.STICK -> moveStick(element, x, y)
@@ -323,12 +351,16 @@ class TouchOverlayView @JvmOverloads constructor(
         // A dead centre press means nothing; past a third of the way out it
         // is a direction, and both axes can be on at once for the diagonals.
         val threshold = 0.32f
+        val oldBits = dpadBits[element.id] ?: 0
         var bits = 0
         if (dy < -threshold) bits = bits or NativeBridge.UP
         if (dy > threshold) bits = bits or NativeBridge.DOWN
         if (dx < -threshold) bits = bits or NativeBridge.LEFT
         if (dx > threshold) bits = bits or NativeBridge.RIGHT
         dpadBits[element.id] = bits
+        if (bits != 0 && bits != oldBits) {
+            triggerHaptic()
+        }
     }
 
     // ---- editing ----------------------------------------------------------------
@@ -452,56 +484,327 @@ class TouchOverlayView @JvmOverloads constructor(
     private fun isOn(element: ControlElement): Boolean =
         held.contains(element.id) || toggled.contains(element.id)
 
+    companion object {
+        // Authentic Xbox 360 Color Palette
+        private const val COLOR_A = 0xFF107C10.toInt()      // Emerald Green
+        private const val COLOR_A_GLOW = 0xFF22C55E.toInt()
+        private const val COLOR_B = 0xFFB91C1C.toInt()      // Ruby Red
+        private const val COLOR_B_GLOW = 0xFFEF4444.toInt()
+        private const val COLOR_X = 0xFF1D4ED8.toInt()      // Royal Blue
+        private const val COLOR_X_GLOW = 0xFF3B82F6.toInt()
+        private const val COLOR_Y = 0xFFD97706.toInt()      // Amber Yellow
+        private const val COLOR_Y_GLOW = 0xFFF59E0B.toInt()
+        private const val COLOR_RT = 0xFFE11D48.toInt()     // Trigger Fire
+        private const val COLOR_RT_GLOW = 0xFFFB7185.toInt()
+        private const val COLOR_LT = 0xFF0EA5E9.toInt()     // Trigger Aim
+        private const val COLOR_LT_GLOW = 0xFF38BDF8.toInt()
+        private const val COLOR_BUMPER_GLOW = 0xFF94A3B8.toInt()
+    }
+
     private fun drawButton(canvas: Canvas, element: ControlElement, alpha: Float, faded: Boolean) {
         val r = radius(element)
+        val cx = centreX(element)
+        val cy = centreY(element)
         val pressed = isOn(element)
-        fill.color = Color.argb(
-            (alpha * (if (faded) 0.45f else 1f) * (if (pressed) 150 else 70)).toInt().coerceIn(0, 255),
-            10, 12, 16,
-        )
-        canvas.drawCircle(centreX(element), centreY(element), r, fill)
-        stroke.color = shade(alpha, pressed, faded)
-        stroke.strokeWidth = max(1.5f, r * 0.055f)
-        canvas.drawCircle(centreX(element), centreY(element), r - stroke.strokeWidth * 0.5f, stroke)
-        text.color = shade(alpha, pressed, faded)
-        text.textSize = r * (if (element.label.length > 2) 0.52f else 0.8f)
-        canvas.drawText(
-            element.label, centreX(element),
-            centreY(element) - (text.descent() + text.ascent()) * 0.5f, text,
-        )
-        if (element.toggle) {
-            // A small mark, so "this one stays down" is visible at a glance.
-            stroke.strokeWidth = max(1f, r * 0.05f)
-            canvas.drawArc(
-                centreX(element) - r * 0.82f, centreY(element) - r * 0.82f,
-                centreX(element) + r * 0.82f, centreY(element) + r * 0.82f,
-                -60f, 120f, false, stroke,
+        val fadeFactor = if (faded) 0.45f else 1f
+
+        val id = element.id.lowercase()
+        val isA = id == "a"
+        val isB = id == "b"
+        val isX = id == "x"
+        val isY = id == "y"
+        val isFaceButton = isA || isB || isX || isY
+        val isRT = id == "rt"
+        val isLT = id == "lt"
+        val isBumper = id == "lb" || id == "rb"
+        val isThumbClick = id == "l3" || id == "r3"
+        val isMenu = id == "start" || id == "back"
+
+        val coreColor = when {
+            isA -> COLOR_A
+            isB -> COLOR_B
+            isX -> COLOR_X
+            isY -> COLOR_Y
+            isRT -> COLOR_RT
+            isLT -> COLOR_LT
+            isBumper -> 0xFF334155.toInt()
+            else -> 0xFF1E242C.toInt()
+        }
+
+        val glowColor = when {
+            isA -> COLOR_A_GLOW
+            isB -> COLOR_B_GLOW
+            isX -> COLOR_X_GLOW
+            isY -> COLOR_Y_GLOW
+            isRT -> COLOR_RT_GLOW
+            isLT -> COLOR_LT_GLOW
+            isBumper -> COLOR_BUMPER_GLOW
+            else -> 0xFF94A3B8.toInt()
+        }
+
+        // Pressed radiant aura glow
+        if (pressed) {
+            fill.color = Color.argb(
+                (alpha * fadeFactor * 130).toInt().coerceIn(0, 255),
+                Color.red(glowColor), Color.green(glowColor), Color.blue(glowColor),
             )
+            canvas.drawCircle(cx, cy, r * 1.15f, fill)
+        }
+
+        if (isFaceButton) {
+            // Xbox 360 Jewel Face Button
+            // 1. Dark bezel collar
+            fill.color = Color.argb(
+                (alpha * fadeFactor * 140).toInt().coerceIn(0, 255),
+                18, 22, 28,
+            )
+            canvas.drawCircle(cx, cy, r, fill)
+
+            // Bezel rim stroke
+            stroke.color = Color.argb(
+                (alpha * fadeFactor * 180).toInt().coerceIn(0, 255),
+                48, 56, 70,
+            )
+            stroke.strokeWidth = max(1.5f, r * 0.05f)
+            canvas.drawCircle(cx, cy, r - stroke.strokeWidth * 0.5f, stroke)
+
+            // 2. Translucent jewel dome
+            val jewelR = r * 0.84f
+            val domeAlpha = if (pressed) 230 else 125
+            fill.color = Color.argb(
+                (alpha * fadeFactor * domeAlpha).toInt().coerceIn(0, 255),
+                Color.red(coreColor), Color.green(coreColor), Color.blue(coreColor),
+            )
+            canvas.drawCircle(cx, cy, jewelR, fill)
+
+            // Jewel perimeter rim
+            stroke.color = Color.argb(
+                (alpha * fadeFactor * (if (pressed) 255 else 180)).toInt().coerceIn(0, 255),
+                Color.red(glowColor), Color.green(glowColor), Color.blue(glowColor),
+            )
+            stroke.strokeWidth = max(1.5f, jewelR * 0.08f)
+            canvas.drawCircle(cx, cy, jewelR - stroke.strokeWidth * 0.5f, stroke)
+
+            // 3. Specular gloss arc highlight (top curve of the acrylic dome)
+            highlightPaint.color = Color.argb(
+                (alpha * fadeFactor * 150).toInt().coerceIn(0, 255),
+                255, 255, 255,
+            )
+            highlightPaint.strokeWidth = max(1.5f, jewelR * 0.07f)
+            val arcInset = jewelR * 0.22f
+            tempRect.set(cx - jewelR + arcInset, cy - jewelR + arcInset * 0.6f, cx + jewelR - arcInset, cy + jewelR - arcInset * 1.4f)
+            canvas.drawArc(tempRect, -145f, 110f, false, highlightPaint)
+
+            // 4. White bold embossed letter
+            val label = element.label
+            text.textSize = jewelR * 0.88f
+            val textY = cy - (text.descent() + text.ascent()) * 0.5f
+
+            // Shadow
+            text.color = Color.argb((alpha * fadeFactor * 160).toInt().coerceIn(0, 255), 0, 0, 0)
+            canvas.drawText(label, cx, textY + 1.5f * density, text)
+
+            // Main letter
+            text.color = Color.argb((alpha * fadeFactor * 255).toInt().coerceIn(0, 255), 255, 255, 255)
+            canvas.drawText(label, cx, textY, text)
+        } else if (isRT || isLT) {
+            // Xbox Ergonomic Trigger (RT / LT)
+            val fillA = (alpha * fadeFactor * (if (pressed) 190 else 95)).toInt().coerceIn(0, 255)
+            fill.color = Color.argb(fillA, Color.red(coreColor), Color.green(coreColor), Color.blue(coreColor))
+            canvas.drawCircle(cx, cy, r, fill)
+
+            stroke.color = Color.argb(
+                (alpha * fadeFactor * (if (pressed) 255 else 170)).toInt().coerceIn(0, 255),
+                Color.red(glowColor), Color.green(glowColor), Color.blue(glowColor),
+            )
+            stroke.strokeWidth = max(2f, r * 0.065f)
+            canvas.drawCircle(cx, cy, r - stroke.strokeWidth * 0.5f, stroke)
+
+            val triggerLabel = if (isRT) "RT" else "LT"
+            val subLabel = if (isRT) "FIRE" else "AIM"
+
+            text.textSize = r * 0.58f
+            text.color = Color.WHITE
+            canvas.drawText(triggerLabel, cx, cy - r * 0.05f, text)
+
+            subText.textSize = r * 0.26f
+            subText.color = Color.argb((alpha * fadeFactor * 220).toInt().coerceIn(0, 255), 226, 232, 240)
+            canvas.drawText(subLabel, cx, cy + r * 0.42f, subText)
+
+            if (element.toggle && toggled.contains(element.id)) {
+                fill.color = Color.argb(255, 56, 189, 248)
+                canvas.drawCircle(cx, cy - r * 0.55f, 3.5f * density, fill)
+            }
+        } else if (isBumper) {
+            // Xbox Bumper (LB / RB)
+            val fillA = (alpha * fadeFactor * (if (pressed) 180 else 85)).toInt().coerceIn(0, 255)
+            fill.color = Color.argb(fillA, 30, 38, 48)
+            canvas.drawCircle(cx, cy, r, fill)
+
+            stroke.color = Color.argb(
+                (alpha * fadeFactor * (if (pressed) 240 else 140)).toInt().coerceIn(0, 255),
+                Color.red(glowColor), Color.green(glowColor), Color.blue(glowColor),
+            )
+            stroke.strokeWidth = max(1.5f, r * 0.055f)
+            canvas.drawCircle(cx, cy, r - stroke.strokeWidth * 0.5f, stroke)
+
+            text.textSize = r * 0.52f
+            text.color = Color.WHITE
+            canvas.drawText(element.label, cx, cy - (text.descent() + text.ascent()) * 0.5f, text)
+        } else if (isThumbClick) {
+            // Thumbstick Click (L3 / R3)
+            val fillA = (alpha * fadeFactor * (if (pressed) 180 else 80)).toInt().coerceIn(0, 255)
+            fill.color = Color.argb(fillA, 24, 30, 38)
+            canvas.drawCircle(cx, cy, r, fill)
+
+            stroke.color = Color.argb(
+                (alpha * fadeFactor * (if (pressed) 230 else 130)).toInt().coerceIn(0, 255),
+                100, 116, 139,
+            )
+            stroke.strokeWidth = max(1.5f, r * 0.05f)
+            canvas.drawCircle(cx, cy, r - stroke.strokeWidth * 0.5f, stroke)
+
+            val tag = if (id == "l3") "LS" else "RS"
+            val sub = if (id == "l3") "RUN" else "MELEE"
+
+            text.textSize = r * 0.50f
+            text.color = Color.WHITE
+            canvas.drawText(tag, cx, cy - r * 0.06f, text)
+
+            subText.textSize = r * 0.25f
+            subText.color = Color.argb((alpha * fadeFactor * 210).toInt().coerceIn(0, 255), 148, 163, 184)
+            canvas.drawText(sub, cx, cy + r * 0.40f, subText)
+        } else if (isMenu) {
+            // Start (▶) / Back (◀◀)
+            val fillA = (alpha * fadeFactor * (if (pressed) 180 else 75)).toInt().coerceIn(0, 255)
+            fill.color = Color.argb(fillA, 22, 27, 34)
+            canvas.drawCircle(cx, cy, r, fill)
+
+            stroke.color = Color.argb(
+                (alpha * fadeFactor * (if (pressed) 230 else 120)).toInt().coerceIn(0, 255),
+                100, 116, 139,
+            )
+            stroke.strokeWidth = max(1.5f, r * 0.045f)
+            canvas.drawCircle(cx, cy, r - stroke.strokeWidth * 0.5f, stroke)
+
+            val icon = if (id == "start") "▶" else "◀◀"
+            text.textSize = r * (if (id == "start") 0.65f else 0.48f)
+            text.color = Color.WHITE
+            canvas.drawText(icon, cx, cy - (text.descent() + text.ascent()) * 0.5f, text)
+        } else {
+            // Fallback general button
+            fill.color = Color.argb((alpha * fadeFactor * (if (pressed) 160 else 75)).toInt().coerceIn(0, 255), 18, 22, 28)
+            canvas.drawCircle(cx, cy, r, fill)
+            stroke.color = shade(alpha, pressed, faded)
+            stroke.strokeWidth = max(1.5f, r * 0.055f)
+            canvas.drawCircle(cx, cy, r - stroke.strokeWidth * 0.5f, stroke)
+            text.color = shade(alpha, pressed, faded)
+            text.textSize = r * (if (element.label.length > 2) 0.52f else 0.8f)
+            canvas.drawText(element.label, cx, cy - (text.descent() + text.ascent()) * 0.5f, text)
         }
     }
 
     private fun drawStick(canvas: Canvas, element: ControlElement, alpha: Float, faded: Boolean) {
         val r = radius(element)
+        val cx = centreX(element)
+        val cy = centreY(element)
+        val fadeFactor = if (faded) 0.45f else 1f
         val position = stickPositions[element.id]
-        fill.color = Color.argb((alpha * (if (faded) 0.45f else 1f) * 60).toInt().coerceIn(0, 255), 10, 12, 16)
-        canvas.drawCircle(centreX(element), centreY(element), r, fill)
-        stroke.color = shade(alpha, false, faded)
-        stroke.strokeWidth = max(1.5f, r * 0.035f)
-        canvas.drawCircle(centreX(element), centreY(element), r - stroke.strokeWidth, stroke)
+        val isDeflected = position != null
 
-        val knobX = centreX(element) + (position?.get(0) ?: 0f) * r * 0.62f
-        val knobY = centreY(element) - (position?.get(1) ?: 0f) * r * 0.62f
-        fill.color = shade(alpha, position != null, faded)
-        canvas.drawCircle(knobX, knobY, r * 0.36f, fill)
+        // 1. Outer socket base (metallic dish)
+        fill.color = Color.argb((alpha * fadeFactor * 75).toInt().coerceIn(0, 255), 16, 20, 26)
+        canvas.drawCircle(cx, cy, r, fill)
+
+        // Outer socket rim stroke
+        stroke.color = Color.argb((alpha * fadeFactor * 130).toInt().coerceIn(0, 255), 45, 55, 70)
+        stroke.strokeWidth = max(1.5f, r * 0.035f)
+        canvas.drawCircle(cx, cy, r - stroke.strokeWidth * 0.5f, stroke)
+
+        // 4 Cardinal Guide Notches on the outer socket perimeter (Xbox stick housing style)
+        val notchLen = r * 0.10f
+        notchPaint.color = Color.argb((alpha * fadeFactor * 160).toInt().coerceIn(0, 255), 70, 85, 105)
+        notchPaint.strokeWidth = max(1.5f, 2f * density)
+        // Top
+        canvas.drawLine(cx, cy - r, cx, cy - r + notchLen, notchPaint)
+        // Bottom
+        canvas.drawLine(cx, cy + r - notchLen, cx, cy + r, notchPaint)
+        // Left
+        canvas.drawLine(cx - r, cy, cx - r + notchLen, cy, notchPaint)
+        // Right
+        canvas.drawLine(cx + r - notchLen, cy, cx + r, cy, notchPaint)
+
+        // 2. Knob position
+        val knobX = cx + (position?.get(0) ?: 0f) * r * 0.62f
+        val knobY = cy - (position?.get(1) ?: 0f) * r * 0.62f
+
+        // Directional deflection vector glow
+        if (isDeflected) {
+            val stickDx = knobX - cx
+            val stickDy = knobY - cy
+            val dist = hypot(stickDx, stickDy)
+            if (dist > 4f * density) {
+                notchPaint.color = Color.argb((alpha * fadeFactor * 100).toInt().coerceIn(0, 255), 16, 124, 16)
+                notchPaint.strokeWidth = max(2f, 3f * density)
+                canvas.drawLine(cx, cy, knobX, knobY, notchPaint)
+            }
+        }
+
+        // 3. Xbox 360 Thumbstick Cap / Knob
+        val knobR = r * 0.38f
+
+        // Outer rubber traction ring
+        fill.color = Color.argb((alpha * fadeFactor * (if (isDeflected) 240 else 210)).toInt().coerceIn(0, 255), 36, 42, 52)
+        canvas.drawCircle(knobX, knobY, knobR, fill)
+
+        // Raised outer rim stroke
+        stroke.color = Color.argb((alpha * fadeFactor * (if (isDeflected) 220 else 160)).toInt().coerceIn(0, 255), 68, 78, 94)
+        stroke.strokeWidth = max(1.5f, knobR * 0.08f)
+        canvas.drawCircle(knobX, knobY, knobR - stroke.strokeWidth * 0.5f, stroke)
+
+        // Inner concave depression bowl
+        val dishR = knobR * 0.72f
+        fill.color = Color.argb((alpha * fadeFactor * 240).toInt().coerceIn(0, 255), 20, 24, 30)
+        canvas.drawCircle(knobX, knobY, dishR, fill)
+
+        // Inner dish bevel
+        stroke.color = Color.argb((alpha * fadeFactor * 100).toInt().coerceIn(0, 255), 12, 14, 18)
+        stroke.strokeWidth = max(1f, 1.5f * density)
+        canvas.drawCircle(knobX, knobY, dishR, stroke)
+
+        // 4. The 4 Signature Xbox Rubber Grip Dimples/Dots (Top, Bottom, Left, Right)
+        val dotOffset = knobR * 0.44f
+        val dotRadius = max(2f, 2.8f * density)
+
+        dimplePaint.style = Paint.Style.FILL
+        dimplePaint.color = Color.argb((alpha * fadeFactor * (if (isDeflected) 230 else 170)).toInt().coerceIn(0, 255), 88, 100, 118)
+
+        // Top dot
+        canvas.drawCircle(knobX, knobY - dotOffset, dotRadius, dimplePaint)
+        // Bottom dot
+        canvas.drawCircle(knobX, knobY + dotOffset, dotRadius, dimplePaint)
+        // Left dot
+        canvas.drawCircle(knobX - dotOffset, knobY, dotRadius, dimplePaint)
+        // Right dot
+        canvas.drawCircle(knobX + dotOffset, knobY, dotRadius, dimplePaint)
     }
 
     private fun drawDpad(canvas: Canvas, element: ControlElement, alpha: Float, faded: Boolean) {
         val r = radius(element)
-        val arm = r * 0.42f
+        val arm = r * 0.40f
         val cx = centreX(element)
         val cy = centreY(element)
         val bits = dpadBits[element.id] ?: 0
-        fill.color = Color.argb((alpha * (if (faded) 0.45f else 1f) * 70).toInt().coerceIn(0, 255), 10, 12, 16)
+        val fadeFactor = if (faded) 0.45f else 1f
+
+        // 1. Metallic circular disc base behind the cross
+        fill.color = Color.argb((alpha * fadeFactor * 85).toInt().coerceIn(0, 255), 16, 20, 26)
+        canvas.drawCircle(cx, cy, r * 0.95f, fill)
+        stroke.color = Color.argb((alpha * fadeFactor * 110).toInt().coerceIn(0, 255), 45, 55, 68)
+        stroke.strokeWidth = max(1.5f, 1.8f * density)
+        canvas.drawCircle(cx, cy, r * 0.95f, stroke)
+
+        // 2. Xbox 360 Cross Path
         path.reset()
         path.moveTo(cx - arm, cy - r)
         path.lineTo(cx + arm, cy - r)
@@ -516,17 +819,54 @@ class TouchOverlayView @JvmOverloads constructor(
         path.lineTo(cx - r, cy - arm)
         path.lineTo(cx - arm, cy - arm)
         path.close()
+
+        // Metallic charcoal fill
+        fill.color = Color.argb((alpha * fadeFactor * 160).toInt().coerceIn(0, 255), 26, 32, 42)
         canvas.drawPath(path, fill)
-        stroke.color = shade(alpha, false, faded)
+
+        // Outer beveled stroke
+        stroke.color = Color.argb((alpha * fadeFactor * 190).toInt().coerceIn(0, 255), 65, 78, 96)
         stroke.strokeWidth = max(1.5f, r * 0.045f)
         canvas.drawPath(path, stroke)
 
-        // The quarter being pressed, filled in.
-        fill.color = shade(alpha, true, faded)
-        if (bits and NativeBridge.UP != 0) canvas.drawRect(cx - arm, cy - r, cx + arm, cy - arm, fill)
-        if (bits and NativeBridge.DOWN != 0) canvas.drawRect(cx - arm, cy + arm, cx + arm, cy + r, fill)
-        if (bits and NativeBridge.LEFT != 0) canvas.drawRect(cx - r, cy - arm, cx - arm, cy + arm, fill)
-        if (bits and NativeBridge.RIGHT != 0) canvas.drawRect(cx + arm, cy - arm, cx + r, cy + arm, fill)
+        // 3. Active Quadrants (illuminated with Xbox Emerald Green)
+        val upOn = bits and NativeBridge.UP != 0
+        val downOn = bits and NativeBridge.DOWN != 0
+        val leftOn = bits and NativeBridge.LEFT != 0
+        val rightOn = bits and NativeBridge.RIGHT != 0
+
+        fill.color = Color.argb((alpha * fadeFactor * 220).toInt().coerceIn(0, 255), 16, 124, 16)
+        if (upOn) canvas.drawRect(cx - arm, cy - r, cx + arm, cy - arm, fill)
+        if (downOn) canvas.drawRect(cx - arm, cy + arm, cx + arm, cy + r, fill)
+        if (leftOn) canvas.drawRect(cx - r, cy - arm, cx - arm, cy + arm, fill)
+        if (rightOn) canvas.drawRect(cx + arm, cy - arm, cx + r, cy + arm, fill)
+
+        // 4. Directional Chevrons / Arrows
+        text.textSize = r * 0.28f
+        val arrowYOffset = (text.descent() + text.ascent()) * 0.5f
+
+        // Up arrow
+        text.color = if (upOn) Color.WHITE else Color.argb((alpha * fadeFactor * 180).toInt().coerceIn(0, 255), 148, 163, 184)
+        canvas.drawText("▲", cx, cy - r * 0.65f - arrowYOffset, text)
+
+        // Down arrow
+        text.color = if (downOn) Color.WHITE else Color.argb((alpha * fadeFactor * 180).toInt().coerceIn(0, 255), 148, 163, 184)
+        canvas.drawText("▼", cx, cy + r * 0.65f - arrowYOffset, text)
+
+        // Left arrow
+        text.color = if (leftOn) Color.WHITE else Color.argb((alpha * fadeFactor * 180).toInt().coerceIn(0, 255), 148, 163, 184)
+        canvas.drawText("◀", cx - r * 0.65f, cy - arrowYOffset, text)
+
+        // Right arrow
+        text.color = if (rightOn) Color.WHITE else Color.argb((alpha * fadeFactor * 180).toInt().coerceIn(0, 255), 148, 163, 184)
+        canvas.drawText("▶", cx + r * 0.65f, cy - arrowYOffset, text)
+
+        // 5. Center pivot dish
+        fill.color = Color.argb((alpha * fadeFactor * 230).toInt().coerceIn(0, 255), 18, 22, 28)
+        canvas.drawCircle(cx, cy, arm * 0.55f, fill)
+        stroke.color = Color.argb((alpha * fadeFactor * 140).toInt().coerceIn(0, 255), 50, 60, 75)
+        stroke.strokeWidth = max(1f, 1.5f * density)
+        canvas.drawCircle(cx, cy, arm * 0.55f, stroke)
     }
 
     private fun drawLook(canvas: Canvas, element: ControlElement, faded: Boolean) {
